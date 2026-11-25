@@ -3,91 +3,102 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>House Roll Call Votes</title>
-<style>
-:root{--fg:#1d1d1b;--muted:#6b6b66;--line:#d9d9d2;--yes:#1e8e4e;--no:#c62828;
-box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-body{margin:0 auto;background:#fff;color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:20px clamp(16px,5vw,48px);max-width:860px}
-h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 16px}
-input,button{font:inherit;color:var(--fg);background:#fff;border:1px solid var(--line);border-radius:6px;padding:7px 10px}
-button{cursor:pointer}
-#find{width:100%;box-sizing:border-box;margin-bottom:14px}
-.row{display:block;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px}
-.row:hover{border-color:var(--fg)}
-.t{font-size:16px}.m{color:var(--muted);font-size:13px;margin:2px 0 8px}
-.bw{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.b{display:flex;height:18px;width:320px;max-width:100%;border-radius:4px;overflow:hidden;background:#f1f1ee;border:1px solid var(--line);box-sizing:border-box}.b i{display:block;height:100%}
-.c{display:flex;gap:12px;font-size:14px;font-weight:700;white-space:nowrap}
-.c .y{color:var(--yes)}.c .n{color:var(--no)}
-.x{color:var(--muted);font-size:12px;margin-top:6px}
-#more{display:none;margin:8px auto 0}
-.foot{color:var(--muted);font-size:13px;margin-top:20px}
-</style>
+<title>Roll Call Votes</title>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
-<h1>House Roll Call Votes</h1>
-<p class="sub">Newest first. Select a vote to see how each district voted.</p>
-<input id="find" placeholder="Search by bill, topic, or roll number">
+<div id="nav"></div>
+<h1 id="h">Roll Call Votes</h1>
+<p class="sub" id="sub"></p>
+<input id="find" type="search" placeholder="Search by bill, topic, or roll number" style="margin-bottom:14px">
 <div id="list"></div>
 <button id="more">Show more</button>
 <p class="foot" id="msg"></p>
-<p class="foot">Data: Congress.gov</p>
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
 <script>
-var IDX=[],shown=40;
-var HEX={dY:"#1f4e9c",dN:"#8fb4e8",rY:"#b21f1f",rN:"#eba0a0",iY:"#5b2a86",iN:"#b99ad6"};
-function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function fmtDate(d){if(!d)return"";var t=new Date(d);return isNaN(t)?d:t.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
-function bar(v){
+var IDX = [], shown = 40, CH = "house", CG = 119, busy = {};
+var HEX = Site.HEX, esc = Site.esc;
+
+function vk(v) { return v.session + "-" + v.roll; }
+function bar(v) {
   var segs;
-  if("dY" in v)segs=["dY","rY","iY","dN","rN","iN"].map(function(k){return[v[k],HEX[k]]});
-  else segs=[[v.yes,"#1e8e4e"],[v.no,"#c62828"]];
-  var t=0;segs.forEach(function(s){t+=s[0]||0});
-  return '<div class="b">'+segs.map(function(s){return s[0]?'<i style="width:'+(s[0]/t*100)+'%;background:'+s[1]+'"></i>':""}).join("")+'</div>';}
-function vk(v){return v.congress+"-"+v.session+"-"+v.roll}
-function tally(rows){
-  var t={dY:0,dN:0,rY:0,rN:0,iY:0,iN:0,present:0,notVoting:0};
-  rows.forEach(function(m){
-    var x=String(m.vote||"").toLowerCase(),p=String(m.party||"").toUpperCase();p=(p==="D"||p==="R")?p.toLowerCase():"i";
-    if(x==="yea"||x==="aye"||x==="yes")t[p+"Y"]++;
-    else if(x==="nay"||x==="no")t[p+"N"]++;
-    else if(x==="present")t.present++;
-    else if(x==="not voting")t.notVoting++;});
-  return t;}
-var busy={};
-async function enrich(v){
-  /* older saved votes have no party counts yet: work them out from the vote's own file */
-  if("dY" in v||busy[vk(v)]||!v.file)return;
-  busy[vk(v)]=1;
-  try{
-    var r=await fetch(v.file);if(!r.ok)return;
-    var j=await r.json();Object.assign(v,tally(j.members));
-    var row=document.querySelector('.row[data-k="'+vk(v)+'"]');
-    if(row){row.querySelector(".bs").innerHTML=bar(v);row.querySelector(".x").textContent="Present "+v.present+" \u00b7 Not voting "+v.notVoting}
-  }catch(e){}}
-function draw(){
-  var q=document.getElementById("find").value.toLowerCase();
-  var f=IDX.filter(function(v){
-    return !q||[v.bill,v.question,v.result,"roll "+v.roll,v.roll,fmtDate(v.date)].join(" ").toLowerCase().indexOf(q)>-1});
-  document.getElementById("list").innerHTML=f.slice(0,shown).map(function(v){
-    var other=("present" in v)?'<div class="x">Present '+v.present+' \u00b7 Not voting '+v.notVoting+'</div>':'<div class="x"></div>';
-    return '<a class="row" data-k="'+vk(v)+'" href="vote.html#'+v.congress+'-'+v.session+'-'+v.roll+'">'+
-      '<div class="t">'+(v.bill?'<b>'+esc(v.bill)+'</b> \u00b7 ':'')+esc(v.question||"Roll call")+'</div>'+
-      '<div class="m">Roll '+v.roll+' \u00b7 '+esc(fmtDate(v.date))+(v.result?' \u00b7 '+esc(v.result):'')+'</div>'+
-      '<div class="bw"><span class="bs">'+bar(v)+'</span><div class="c"><span class="y">YES '+v.yes+'</span><span class="n">NO '+v.no+'</span></div></div>'+other+'</a>'}).join("");
-  f.slice(0,shown).forEach(function(v,i){setTimeout(function(){enrich(v)},i*60)});
-  var more=document.getElementById("more");
-  more.style.display=f.length>shown?"block":"none";
-  document.getElementById("msg").textContent=f.length?"":(IDX.length?"No votes match your search.":"");}
-document.getElementById("find").oninput=function(){shown=40;draw()};
-document.getElementById("more").onclick=function(){shown+=40;draw()};
-(async function(){
-  try{
-    var r=await fetch("data/index.json");if(!r.ok)throw new Error("HTTP "+r.status);
-    IDX=await r.json();
-  }catch(e){document.getElementById("msg").textContent="No saved votes found yet ("+e.message+").";return}
-  IDX.sort(function(a,b){return(b.date||"")<(a.date||"")?-1:1});
-  if(!IDX.length)document.getElementById("msg").textContent="No saved votes yet.";
+  if ("dY" in v) segs = ["dY", "rY", "iY", "dN", "rN", "iN"].map(function (k) { return [v[k], HEX[k]]; });
+  else segs = [[v.yes, "#1e8e4e"], [v.no, "#c62828"]];
+  var t = 0;
+  segs.forEach(function (s) { t += s[0] || 0; });
+  return '<div class="b">' + segs.map(function (s) {
+    return s[0] ? '<i style="width:' + (s[0] / t * 100) + '%;background:' + s[1] + '"></i>' : "";
+  }).join("") + "</div>";
+}
+function tally(rows) {
+  var t = {dY: 0, dN: 0, rY: 0, rN: 0, iY: 0, iN: 0, present: 0, notVoting: 0};
+  rows.forEach(function (m) {
+    var x = String(m.vote || "").toLowerCase(), p = String(m.party || "").toUpperCase();
+    p = (p === "D" || p === "R") ? p.toLowerCase() : "i";
+    if (x === "yea" || x === "aye" || x === "yes" || x === "guilty") t[p + "Y"]++;
+    else if (x === "nay" || x === "no" || x === "not guilty") t[p + "N"]++;
+    else if (x === "present") t.present++;
+    else if (x === "not voting") t.notVoting++;
+  });
+  return t;
+}
+async function enrich(v) {
+  /* votes saved before party counts existed: work them out from the vote's own file */
+  if ("dY" in v || busy[vk(v)] || !v.file) return;
+  busy[vk(v)] = 1;
+  try {
+    var r = await fetch(v.file);
+    if (!r.ok) return;
+    var j = await r.json();
+    Object.assign(v, tally(j.members));
+    var row = document.querySelector('.row[data-k="' + vk(v) + '"]');
+    if (row) {
+      row.querySelector(".bs").innerHTML = bar(v);
+      row.querySelector(".x").textContent = "Present " + v.present + " · Not voting " + v.notVoting;
+    }
+  } catch (e) {}
+}
+function draw() {
+  var q = document.getElementById("find").value.toLowerCase();
+  var f = IDX.filter(function (v) {
+    return !q || [v.bill, v.question, v.title, v.result, "roll " + v.roll, v.roll, Site.fmtDate(v.date)].join(" ").toLowerCase().indexOf(q) > -1;
+  });
+  document.getElementById("list").innerHTML = f.slice(0, shown).map(function (v) {
+    var other = ("present" in v) ? "Present " + v.present + " · Not voting " + v.notVoting : "";
+    return '<a class="row" data-k="' + vk(v) + '" href="' + Site.voteHref(CH, CG, v.session, v.roll) + '">' +
+      '<div class="t">' + (v.bill ? "<b>" + esc(v.bill) + "</b> · " : "") + esc(v.question || "Roll call") + "</div>" +
+      (v.title && v.title !== v.question ? '<div class="tt">' + esc(v.title) + "</div>" : "") +
+      '<div class="m">Roll ' + v.roll + " · " + esc(Site.fmtDate(v.date)) + (v.result ? " · " + esc(v.result) : "") + "</div>" +
+      '<div class="bw"><span class="bs">' + bar(v) + '</span><div class="c"><span class="y">YES ' + v.yes + '</span><span class="n">NO ' + v.no + "</span></div></div>" +
+      '<div class="x">' + other + "</div></a>";
+  }).join("");
+  document.getElementById("more").style.display = f.length > shown ? "block" : "none";
+  document.getElementById("msg").textContent = f.length ? "" : (IDX.length ? "No votes match your search." : "");
+  f.slice(0, shown).forEach(function (v, i) { setTimeout(function () { enrich(v); }, i * 60); });
+}
+document.getElementById("find").oninput = function () { shown = 40; draw(); };
+document.getElementById("more").onclick = function () { shown += 40; draw(); };
+
+(async function () {
+  Site.nav("votes");
+  var q = Site.qs(), info = await Site.congresses();
+  CH = q.get("chamber") === "senate" ? "senate" : "house";
+  CG = parseInt(q.get("congress"), 10) || (info ? info.latest : 119);
+  var title = Site.chamberName(CH) + " Roll Call Votes";
+  document.getElementById("h").textContent = title;
+  document.getElementById("sub").textContent = Site.ordinal(CG) + " Congress (" + (info ? ((info.congresses.filter(function (x) { return x.congress === CG; })[0] || {}).years || "") : "") + "). Newest first. Select a vote to see how each " + (CH === "senate" ? "senator" : "district") + " voted.";
+  document.title = title + " — " + Site.ordinal(CG) + " Congress";
+  try {
+    IDX = await Site.json("data/" + CH + "/" + CG + "/index.json");
+  } catch (e) {
+    document.getElementById("msg").textContent = "No saved votes found yet for the " + Site.ordinal(CG) + " Congress " + Site.chamberName(CH) + " (" + e.message + ").";
+    return;
+  }
+  IDX.sort(function (a, b) {
+    return (b.date || "") < (a.date || "") ? -1 : (b.date || "") > (a.date || "") ? 1 : (b.session - a.session) || (b.roll - a.roll);
+  });
+  if (!IDX.length) document.getElementById("msg").textContent = "No saved votes yet.";
   draw();
 })();
 </script>

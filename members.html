@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Members</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<h1 id="h">Members</h1>
+<p class="sub" id="sub"></p>
+<div class="chips">
+  <input id="find" type="search" placeholder="Find a member by name or state" style="flex:1 1 260px;max-width:380px;width:auto">
+  <span id="pf"></span>
+</div>
+<p class="small" id="count"></p>
+<div class="tblwrap"><table class="tbl" id="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
+<p class="small" style="margin-top:14px">Missed votes: share of roll calls, while serving, where the member was recorded as Not Voting. Against party: share of the member's Yea/Nay votes that went against the majority of their own party on that roll call (ties, Present votes, and independents are not counted). The data does not say why a vote was missed.</p>
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var CH="house",CG=119,ALL=[],pf="ALL",sortKey="name",sortDir=1,esc=Site.esc;
+
+function stat(e){return e.c[CG]}
+function pct(n,d){return d?n/d:null}
+function fmtPct(n,d){return d?(100*n/d).toFixed(1)+"%":"—"}
+var COLS=[
+  {k:"name",t:"Member",val:function(e){return(e.last+" "+e.first).toLowerCase()}},
+  {k:"party",t:"Party",val:function(e){return stat(e).party}},
+  {k:"state",t:"State",val:function(e){return stat(e).state}},
+  {k:"district",t:"District",house:true,val:function(e){return stat(e).district||0}},
+  {k:"votes",t:"Votes",num:true,val:function(e){return stat(e).eligible}},
+  {k:"missed",t:"Missed",num:true,val:function(e){var s=stat(e);return pct(s.missed,s.eligible)}},
+  {k:"against",t:"Against party",num:true,val:function(e){var s=stat(e);return pct(s.against,s.partyVotes)}}
+];
+function cols(){return COLS.filter(function(c){return !c.house||CH==="house"})}
+function head(){
+  document.getElementById("th").innerHTML="<tr>"+cols().map(function(c){
+    return'<th class="'+(c.num?"num":"")+'"><button data-k="'+c.k+'" class="'+(sortKey===c.k?"on":"")+'">'+c.t+(sortKey===c.k?(sortDir>0?" ▲":" ▼"):"")+"</button></th>"}).join("")+"</tr>";
+  document.querySelectorAll("#th button").forEach(function(b){
+    b.onclick=function(){var k=b.dataset.k;if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=(k==="name"||k==="state"||k==="party"||k==="district")?1:-1}draw()}});}
+function draw(){
+  head();
+  var q=document.getElementById("find").value.toLowerCase().split(/\s+/).filter(Boolean);
+  var col=COLS.filter(function(c){return c.k===sortKey})[0];
+  var rows=ALL.filter(function(e){
+    var s=stat(e);
+    if(pf!=="ALL"&&s.party!==pf&&!(pf==="I"&&s.party!=="D"&&s.party!=="R"))return false;
+    var hay=(e.first+" "+e.last+" "+s.state+" "+s.state+"-"+(s.district||"")).toLowerCase();
+    return q.every(function(t){return hay.indexOf(t)>-1});
+  });
+  rows.sort(function(a,b){
+    var x=col.val(a),y=col.val(b);
+    if(x===null)return 1;if(y===null)return -1;
+    return(x<y?-1:x>y?1:(a.last<b.last?-1:1))*sortDir});
+  document.getElementById("count").textContent=rows.length+" member"+(rows.length===1?"":"s");
+  document.getElementById("tb").innerHTML=rows.map(function(e){
+    var s=stat(e),p=(s.party==="D"||s.party==="R")?s.party:"I";
+    return"<tr><td><a href=\""+Site.memberHref(e.id,CG)+"\">"+esc(e.last+", "+e.first)+"</a></td>"+
+      '<td><span class="badge '+p+'">'+esc(s.party||"?")+"</span></td><td>"+esc(s.state)+"</td>"+
+      (CH==="house"?"<td>"+(s.district||"—")+"</td>":"")+
+      '<td class="num">'+s.eligible+'</td><td class="num">'+s.missed+" ("+fmtPct(s.missed,s.eligible)+')</td>'+
+      '<td class="num">'+(s.partyVotes?s.against+" ("+fmtPct(s.against,s.partyVotes)+")":"—")+"</td></tr>"}).join("");
+}
+function chips(){
+  var h="";
+  [["ALL","All"],["D","Democratic"],["R","Republican"],["I","Independent"]].forEach(function(p){
+    h+='<button data-p="'+p[0]+'" class="'+(pf===p[0]?"on":"")+'">'+p[1]+"</button> "});
+  var el=document.getElementById("pf");el.innerHTML=h;
+  el.querySelectorAll("button").forEach(function(b){b.onclick=function(){pf=b.dataset.p;chips();draw()}});}
+document.getElementById("find").oninput=draw;
+
+(async function(){
+  Site.nav("members");
+  var q=Site.qs(),info=await Site.congresses();
+  CH=q.get("chamber")==="senate"?"senate":"house";
+  CG=parseInt(q.get("congress"),10)||(info?info.latest:119);
+  var yrs=info?((info.congresses.filter(function(x){return x.congress===CG})[0]||{}).years||""):"";
+  var title=(CH==="senate"?"Senators":"Representatives");
+  document.getElementById("h").textContent=title;
+  document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress ("+yrs+"). Select a name to see their votes, missed votes, and legislation.";
+  document.title=title+" — "+Site.ordinal(CG)+" Congress";
+  var dir;
+  try{dir=await Site.json("data/members/directory.json")}
+  catch(e){document.getElementById("count").textContent="Member data is not available yet ("+e.message+").";return}
+  ALL=dir.filter(function(e){var s=e.c&&e.c[CG];return s&&s.chamber===CH&&s.eligible>0});
+  chips();draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Member</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<p class="small" style="margin-bottom:0"><a id="back" href="members.html">&larr; All members</a></p>
+<h1 id="h">Member</h1>
+<p class="sub" id="sub"></p>
+<div class="chips" id="cg"></div>
+<div class="cards" id="cards"></div>
+<p class="small" id="note"></p>
+
+<div class="ptabs" id="ptabs">
+  <button data-t="votes" class="on">Voting record</button>
+  <button data-t="spons">Sponsored</button>
+  <button data-t="cospons">Cosponsored</button>
+</div>
+
+<div id="p-votes">
+  <div class="chips" id="vf"></div>
+  <input id="vq" type="search" placeholder="Search this member's votes (bill, topic, roll number)" style="margin-bottom:10px">
+  <div class="tblwrap"><table class="tbl"><thead><tr><th>Date</th><th>Vote</th><th>Description</th><th>Result</th><th>Member voted</th><th>vs. party</th></tr></thead><tbody id="vb"></tbody></table></div>
+  <p class="small" id="vc"></p>
+  <button id="vmore" style="display:none">Show more</button>
+</div>
+<div id="p-spons" style="display:none"><p class="small" id="sh"></p><ul class="blist" id="sl"></ul></div>
+<div id="p-cospons" style="display:none"><p class="small" id="ch"></p><ul class="blist" id="cl"></ul></div>
+
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,ME=null,CG=119,CH="house",MX=null,IDX={},VROWS=[],vfilter="all",shown=100,LEG=null;
+
+function count(s,chars){var n=0;for(var i=0;i<s.length;i++)if(chars.indexOf(s[i])>-1)n++;return n}
+function pctText(n,d){return d?(100*n/d).toFixed(1)+"%":"—"}
+var LABEL={y:["YES","cy"],Y:["YES","cy"],a:["YES","cy"],n:["NO","cn"],N:["NO","cn"],b:["NO","cn"],p:["Present","cg"],m:["Not voting","cg"]};
+
+function cards(s){
+  var elig=s.length-count(s,"-"),missed=count(s,"m"),present=count(s,"p"),
+      against=count(s,"YN"),pv=count(s,"yYnN"),yes=count(s,"yYa"),no=count(s,"nNb");
+  document.getElementById("cards").innerHTML=[
+    ["Roll calls on the record",elig,"while serving in this Congress"],
+    ["Missed votes",missed,pctText(missed,elig)+" of roll calls"],
+    ["Against own party",against,pv?pctText(against,pv)+" of "+pv+" votes with a party majority":"No party majority to compare"],
+    ["Voted YES / NO",yes+" / "+no,present?present+" Present":"No Present votes"]
+  ].map(function(c){return'<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div><div class="d">'+c[2]+"</div></div>"}).join("");}
+
+function drawVotes(){
+  var q=document.getElementById("vq").value.toLowerCase().split(/\s+/).filter(Boolean);
+  var rows=VROWS.filter(function(r){
+    var c=r.code;
+    if(vfilter==="yes"&&"yYa".indexOf(c)<0)return false;
+    if(vfilter==="no"&&"nNb".indexOf(c)<0)return false;
+    if(vfilter==="present"&&c!=="p")return false;
+    if(vfilter==="missed"&&c!=="m")return false;
+    if(vfilter==="against"&&"YN".indexOf(c)<0)return false;
+    var hay=[r.v.bill,r.v.question,r.v.title,r.v.result,"roll "+r.v.roll,Site.fmtDate(r.v.date)].join(" ").toLowerCase();
+    return q.every(function(t){return hay.indexOf(t)>-1});
+  });
+  document.getElementById("vb").innerHTML=rows.slice(0,shown).map(function(r){
+    var v=r.v,l=LABEL[r.code],rel="—";
+    if("yn".indexOf(r.code)>-1)rel="With party";
+    if("YN".indexOf(r.code)>-1)rel='<b>Against party</b>';
+    return"<tr><td>"+esc(Site.fmtDate(v.date))+'</td><td><a href="'+Site.voteHref(CH,CG,v.session,v.roll)+'">Roll '+v.roll+"</a></td><td>"+
+      (v.bill?"<b>"+esc(v.bill)+"</b> · ":"")+esc(v.question||"")+(v.title&&v.title!==v.question?'<div class="small" style="margin:0">'+esc(v.title)+"</div>":"")+"</td><td>"+esc(v.result||"")+
+      '</td><td class="'+l[1]+'"><b>'+l[0]+"</b></td><td>"+rel+"</td></tr>"}).join("");
+  document.getElementById("vc").textContent=rows.length+" of "+VROWS.length+" roll calls";
+  document.getElementById("vmore").style.display=rows.length>shown?"inline-block":"none";}
+
+function drawBills(kind,listId,headId){
+  var slot=(LEG&&LEG.congresses&&LEG.congresses[CG])||null;
+  var items=slot?slot[kind]:[],ul=document.getElementById(listId),h=document.getElementById(headId);
+  if(!LEG){h.textContent="This member's bills have not been collected yet. They are added a few members at a time, so check back soon.";ul.innerHTML="";return}
+  h.textContent=items.length+" "+kind+" bill"+(items.length===1?"":"s")+" in the "+Site.ordinal(CG)+" Congress (updated "+Site.fmtDate(LEG.updated)+").";
+  ul.innerHTML=items.map(function(b){
+    var url=Site.billUrl(b.type,b.number,CG),label=(b.type||"")+" "+b.number;
+    return"<li>"+(url?'<a class="bn" href="'+url+'" target="_blank" rel="noopener">'+esc(label)+"</a>":'<span class="bn">'+esc(label)+"</span>")+esc(b.title)+' <span class="bd">'+esc(Site.fmtDate(b.date))+"</span></li>"}).join("");}
+
+function showTab(t){
+  document.querySelectorAll("#ptabs button").forEach(function(b){b.classList.toggle("on",b.dataset.t===t)});
+  ["votes","spons","cospons"].forEach(function(x){document.getElementById("p-"+x).style.display=x===t?"":"none"});}
+document.getElementById("ptabs").addEventListener("click",function(e){if(e.target.dataset.t)showTab(e.target.dataset.t)});
+document.getElementById("vq").oninput=function(){shown=100;drawVotes()};
+document.getElementById("vmore").onclick=function(){shown+=100;drawVotes()};
+
+async function loadCongress(){
+  var c=ME.c[CG],s;
+  CH=c.chamber;
+  var title=(CH==="senate"?"Sen. ":"Rep. ")+ME.first+" "+ME.last;
+  document.getElementById("h").textContent=title;
+  document.title=title;
+  var pn={D:"Democratic",R:"Republican",I:"Independent"}[c.party]||c.party||"";
+  document.getElementById("sub").innerHTML='<span class="badge '+((c.party==="D"||c.party==="R")?c.party:"I")+'">'+esc(c.party||"?")+"</span> "+esc(pn)+" · "+esc(c.state)+(CH==="house"&&c.district?", District "+c.district:"")+" · "+Site.ordinal(CG)+" Congress "+Site.chamberName(CH);
+  document.getElementById("back").href="members.html?chamber="+CH+"&congress="+CG;
+  document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call.";
+  try{
+    var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);
+    MX=r[0];IDX={};r[1].forEach(function(v){IDX[v.session+"-"+v.roll]=v});
+  }catch(e){document.getElementById("cards").textContent="Voting data is not available yet ("+e.message+").";return}
+  s=MX.members[ME.id]||"";
+  cards(s);
+  VROWS=[];
+  MX.votes.forEach(function(sr,i){var code=s[i],v=IDX[sr[0]+"-"+sr[1]];if(code&&code!=="-"&&v)VROWS.push({v:v,code:code})});
+  VROWS.sort(function(a,b){return(b.v.date||"")<(a.v.date||"")?-1:(b.v.date||"")>(a.v.date||"")?1:(b.v.session-a.v.session)||(b.v.roll-a.v.roll)});
+  shown=100;drawVotes();
+  try{LEG=await Site.json("data/legislation/"+encodeURIComponent(ME.id)+".json")}catch(e){LEG=null}
+  drawBills("sponsored","sl","sh");drawBills("cosponsored","cl","ch");
+  document.getElementById("ptabs").children[1].textContent="Sponsored"+(LEG&&LEG.congresses&&LEG.congresses[CG]?" ("+LEG.congresses[CG].sponsored.length+")":"");
+  document.getElementById("ptabs").children[2].textContent="Cosponsored"+(LEG&&LEG.congresses&&LEG.congresses[CG]?" ("+LEG.congresses[CG].cosponsored.length+")":"");
+}
+
+(async function(){
+  Site.nav("members");
+  var q=Site.qs(),id=q.get("id");
+  var dir;
+  try{dir=await Site.json("data/members/directory.json")}
+  catch(e){document.getElementById("sub").textContent="Member data is not available yet ("+e.message+").";return}
+  ME=dir.filter(function(e){return e.id===id})[0];
+  if(!ME){document.getElementById("h").textContent="Member not found";return}
+  var cgs=Object.keys(ME.c).map(Number).sort(function(a,b){return b-a});
+  CG=parseInt(q.get("congress"),10);
+  if(!ME.c[CG])CG=cgs[0];
+  document.getElementById("cg").innerHTML=cgs.length>1?"<span>Congress:</span> "+cgs.map(function(c){return'<button data-c="'+c+'" class="'+(c===CG?"on":"")+'">'+Site.ordinal(c)+"</button>"}).join(" "):"";
+  document.querySelectorAll("#cg button").forEach(function(b){b.onclick=function(){location.search="?id="+encodeURIComponent(id)+"&congress="+b.dataset.c}});
+  var f=[["all","All"],["yes","Yes"],["no","No"],["present","Present"],["missed","Not voting"],["against","Against party"]];
+  document.getElementById("vf").innerHTML="<span>Show:</span> "+f.map(function(x){return'<button data-f="'+x[0]+'" class="'+(x[0]==="all"?"on":"")+'">'+x[1]+"</button>"}).join(" ");
+  document.querySelectorAll("#vf button").forEach(function(b){b.onclick=function(){vfilter=b.dataset.f;shown=100;
+    document.querySelectorAll("#vf button").forEach(function(x){x.classList.toggle("on",x===b)});drawVotes()}});
+  loadCongress();
+})();
+</script>
+</body>
+</html>

@@ -1,31 +1,83 @@
 #!/usr/bin/env python3
-"""Saves House roll call votes from the Congress.gov API as permanent JSON files.
+"""Saves House and Senate roll call votes as permanent JSON files, works out
+per-member statistics, and gradually collects each member's sponsored and
+cosponsored legislation.
 
-Run it on a schedule. Each run adds only votes it has not saved yet:
-  data/index.json                      list of all saved votes (newest first)
-  data/votes/119-2-327.json            one file per vote, district numbers included
-  data/members-119.json                bioguideID -> district cache
+Run it on a schedule. Every run only adds what is new.
+
+Layout (all under OUT_DIR, default "data"):
+  congresses.json                          which Congresses/chambers exist
+  house/119/index.json                     list of votes (newest first)
+  house/119/votes/2-327.json               one file per vote (session-roll)
+  house/119/matrix.json                    every member's vote on every roll call
+  senate/119/...                           same for the Senate
+  members/directory.json                   every member + per-Congress stats
+  members/cache-119.json                   bioguide ID -> district/name/state
+  legislation/B001323.json                 a member's sponsored/cosponsored bills
 
 Environment variables:
   CONGRESS_API_KEY   (required)
-  CONGRESS           default 119
-  SESSIONS           default "1,2"
+  CONGRESSES         e.g. "118,119". Default: the previous and the current Congress.
+  MAX_NEW            max new votes saved per chamber and Congress per run (default 400)
+  LEG_BUDGET         max API requests spent on bills per run (default 1200)
+  LEG_REFRESH_DAYS   re-fetch a member's bills after this many days (default 5)
   OUT_DIR            default "data"
-  MAX_NEW            default 200 (max new votes saved per run; the rest come next run)
+
+To rebuild the member statistics from scratch, delete
+data/*/*/matrix.json and data/members/directory.json and run again.
 """
-import json, os, sys, time, urllib.error, urllib.parse, urllib.request
+import datetime
+import json
+import os
+import re
+import sys
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
-BASE = "https://api.congress.gov/v3"
-ATLARGE = {"AK", "DE", "ND", "SD", "VT", "WY", "DC"}
-YES, NO = {"yea", "aye", "yes"}, {"nay", "no"}
+API = "https://api.congress.gov/v3"
+SENATE_BASE = "https://www.senate.gov/legislative/LIS/roll_call_votes"
+OUT = os.environ.get("OUT_DIR", "data")
+ATLARGE = {"AK", "DE", "ND", "SD", "VT", "WY"}
+YES = {"yea", "aye", "yes", "guilty"}
+NO = {"nay", "no", "not guilty"}
+BIOGUIDE = re.compile(r"^[A-Z]\d{6}$")
+STATES = {
+    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
+    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
+    "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
+    "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN",
+    "Mississippi": "MS", "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR",
+    "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD",
+    "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA",
+    "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
+    "Puerto Rico": "PR", "Guam": "GU", "American Samoa": "AS", "Northern Mariana Islands": "MP",
+    "Virgin Islands": "VI", "U.S. Virgin Islands": "VI",
+}
+REQS = 0
+MEMBERS = {}
 
 
+def log(*a):
+    print(*a, flush=True)
+
+
+# ---------------------------------------------------------------- HTTP
 def get(path, **params):
+    """One Congress.gov API request (JSON). Returns None on 404."""
+    global REQS
     q = {"format": "json", "limit": 250, "api_key": os.environ["CONGRESS_API_KEY"]}
     q.update(params)
-    url = BASE + path + "?" + urllib.parse.urlencode(q)
+    url = API + path + "?" + urllib.parse.urlencode(q)
     for attempt in range(4):
         try:
+            REQS += 1
             req = urllib.request.Request(url, headers={"User-Agent": "vote-archive"})
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.load(r)
@@ -41,16 +93,43 @@ def get(path, **params):
     raise RuntimeError("Request failed: " + path)
 
 
-def log(*a):
-    print(*a, flush=True)
+def fetch_bytes(url):
+    """Plain download (used for senate.gov). Returns None if the page does not exist."""
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "vote-archive"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):
+                return None
+            if e.code == 429 or e.code >= 500:
+                time.sleep(5 * (attempt + 1))
+                continue
+            return None
+        except Exception:
+            time.sleep(3 * (attempt + 1))
+    return None
 
 
-def paged(path, finder, keyfn, max_pages=20, single=False):
+def find_list(j, preferred):
+    if not j:
+        return []
+    if isinstance(j.get(preferred), list):
+        return j[preferred]
+    for v in j.values():
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            return v
+    return []
+
+
+def paged(path, finder, keyfn, max_pages=20, single=False, quiet=False):
     """Fetch every page. Stops when a page is short, repeats itself, or adds nothing new.
-    single=True fetches just one request (the vote members endpoint returns everyone at once)."""
+    single=True makes just one request (the House vote-members endpoint returns everyone at once)."""
     items, seen, offset, first = [], set(), 0, None
     for _ in range(max_pages):
-        log("  GET", path, "offset", offset)
+        if not quiet:
+            log("  GET", path, "offset", offset)
         j = get(path, offset=offset)
         if first is None:
             first = j
@@ -64,15 +143,7 @@ def paged(path, finder, keyfn, max_pages=20, single=False):
     return items, first
 
 
-def find_list(j, preferred):
-    if preferred in j and isinstance(j[preferred], list):
-        return j[preferred]
-    for v in j.values():
-        if isinstance(v, list) and v and isinstance(v[0], dict):
-            return v
-    return []
-
-
+# ---------------------------------------------------------------- files
 def load_json(path, default):
     try:
         with open(path, encoding="utf-8") as f:
@@ -82,109 +153,517 @@ def load_json(path, default):
 
 
 def save_json(path, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
 
+def web(path):
+    return path.replace(os.sep, "/")
+
+
+def cdir(chamber, cg):
+    return os.path.join(OUT, chamber, str(cg))
+
+
+def vote_path(chamber, cg, session, roll):
+    return os.path.join(cdir(chamber, cg), "votes", "%d-%d.json" % (session, roll))
+
+
+def load_index(chamber, cg):
+    return load_json(os.path.join(cdir(chamber, cg), "index.json"), [])
+
+
+def save_index(chamber, cg, index):
+    index.sort(key=lambda e: (e.get("date") or "", e["session"], e["roll"]), reverse=True)
+    save_json(os.path.join(cdir(chamber, cg), "index.json"), index)
+
+
+def current_congress(today=None):
+    today = today or datetime.date.today()
+    c = (today.year - 1789) // 2 + 1
+    if today.year % 2 == 1 and (today.month, today.day) < (1, 3):
+        c -= 1
+    return c
+
+
+def years_of(cg):
+    start = 1789 + 2 * (cg - 1)
+    return "%d–%d" % (start, start + 2)
+
+
+# ---------------------------------------------------------------- tallies
+def vkind(v):
+    v = (v or "").strip().lower()
+    if v in YES:
+        return "Y"
+    if v in NO:
+        return "N"
+    if v == "present":
+        return "P"
+    if v == "not voting":
+        return "M"
+    return None
+
+
 def tally(rows):
-    """Per-party YES/NO counts plus Present / Not Voting, for the front page bars."""
+    """Per-party YES/NO counts plus Present / Not Voting, for the list-page bars."""
     t = {"dY": 0, "dN": 0, "rY": 0, "rN": 0, "iY": 0, "iN": 0, "present": 0, "notVoting": 0}
     for m in rows:
-        v = (m.get("vote") or "").lower()
+        k = vkind(m.get("vote"))
         p = (m.get("party") or "").upper()
         p = p.lower() if p in ("D", "R") else "i"
-        if v in YES:
-            t[p + "Y"] += 1
-        elif v in NO:
-            t[p + "N"] += 1
-        elif v == "present":
+        if k in ("Y", "N"):
+            t[p + k] += 1
+        elif k == "P":
             t["present"] += 1
-        elif v == "not voting":
+        elif k == "M":
             t["notVoting"] += 1
     return t
 
 
+def nname(s):
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z]", "", s)
+
+
+# ---------------------------------------------------------------- members cache
 def fetch_members(cg):
     log("Fetching member list for Congress", cg)
     items, _ = paged("/member/congress/" + str(cg), lambda j: find_list(j, "members"),
-                     lambda m: m.get("bioguideId"))
-    return {m["bioguideId"]: m.get("district") for m in items if m.get("bioguideId")}
+                     lambda m: m.get("bioguideId"), max_pages=10)
+    out = {}
+    for m in items:
+        mid = m.get("bioguideId")
+        if not mid:
+            continue
+        terms = m.get("terms") or {}
+        tl = terms.get("item") if isinstance(terms, dict) else terms
+        chamber = ""
+        if isinstance(tl, list) and tl and isinstance(tl[-1], dict):
+            chamber = tl[-1].get("chamber", "") or ""
+        st = m.get("state", "") or ""
+        out[mid] = [m.get("district"), m.get("name", "") or "", STATES.get(st, st), chamber]
+    return out
 
 
-def main():
-    cg = int(os.environ.get("CONGRESS", "119"))
-    sessions = [s.strip() for s in os.environ.get("SESSIONS", "1,2").split(",") if s.strip()]
-    out_dir = os.environ.get("OUT_DIR", "data")
-    max_new = int(os.environ.get("MAX_NEW", "200"))
+def get_members(cg, force=False):
+    if cg in MEMBERS and not force:
+        return MEMBERS[cg]
+    path = os.path.join(OUT, "members", "cache-%d.json" % cg)
+    cached = None if force else load_json(path, None)
+    if not cached or cached.get("v") != 2:
+        cached = {"v": 2, "members": fetch_members(cg)}
+        save_json(path, cached)
+    MEMBERS[cg] = cached["members"]
+    return MEMBERS[cg]
 
-    index_path = os.path.join(out_dir, "index.json")
-    index = load_json(index_path, [])
-    have = {(v["congress"], v["session"], v["roll"]) for v in index}
-    for e in index:  # fill in party counts for votes saved by an older version
-        if "dY" not in e:
-            d = load_json(os.path.join(out_dir, "votes", "%d-%d-%d.json" % (e["congress"], e["session"], e["roll"])), None)
-            if d:
-                e.update(tally(d["members"]))
 
-    mem_path = os.path.join(out_dir, "members-%d.json" % cg)
-    members = load_json(mem_path, None)
-    if members is None:
-        members = fetch_members(cg)
-        save_json(mem_path, members)
+def district_of(members, bio, state):
+    info = members.get(bio)
+    d = info[0] if info else None
+    if d in (None, 0, "0", "") and state in ATLARGE:
+        return 1
+    return d
+
+
+def senator_id(members, state, first, last):
+    """Senate XML has no Bioguide ID, so match on state + name against the member list."""
+    L = nname(last)
+    c = [i for i, v in members.items()
+         if v[2] == state and nname((v[1] or "").split(",")[0]) == L]
+    if len(c) > 1:
+        s = [i for i in c if (members[i][3] or "").lower().startswith("sen")]
+        c = s or c
+    if len(c) > 1:
+        f = nname(first)
+        s = [i for i in c
+             if nname(((members[i][1] or "").split(",")[-1].strip().split(" ") or [""])[0]) == f]
+        c = s or c
+    return c[0] if len(c) == 1 else "SEN-%s-%s" % (state, nname(last))
+
+
+# ---------------------------------------------------------------- legacy migration
+def migrate_legacy():
+    """Moves votes saved by the first version (data/index.json, data/votes/*) into data/house/<congress>/."""
+    old_idx = os.path.join(OUT, "index.json")
+    if not os.path.exists(old_idx):
+        return
+    entries = load_json(old_idx, [])
+    log("Migrating", len(entries), "saved votes to the new folder layout")
+    by = {}
+    for e in entries:
+        cg = e["congress"]
+        old_file = os.path.join(OUT, "votes", "%d-%d-%d.json" % (cg, e["session"], e["roll"]))
+        d = load_json(old_file, None)
+        if not d:
+            continue
+        d["chamber"] = "house"
+        p = vote_path("house", cg, e["session"], e["roll"])
+        save_json(p, d)
+        e2 = dict(e)
+        e2["chamber"] = "house"
+        e2["file"] = web(p)
+        if "dY" not in e2:
+            e2.update(tally(d["members"]))
+        by.setdefault(cg, []).append(e2)
+        try:
+            os.remove(old_file)
+        except OSError:
+            pass
+    for cg, lst in by.items():
+        have = {(x["session"], x["roll"]) for x in load_index("house", cg)}
+        idx = load_index("house", cg) + [x for x in lst if (x["session"], x["roll"]) not in have]
+        save_index("house", cg, idx)
+    for stale in [old_idx] + [os.path.join(OUT, f) for f in os.listdir(OUT)
+                              if re.match(r"members-\d+\.json$", f)]:
+        try:
+            os.remove(stale)
+        except OSError:
+            pass
+    try:
+        os.rmdir(os.path.join(OUT, "votes"))
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- House
+def process_house(cg, max_new):
+    members = get_members(cg)
+    index = load_index("house", cg)
+    have = {(e["session"], e["roll"]) for e in index}
     refreshed = False
-
     added = 0
-    for ss in sessions:
-        log("Listing votes for session", ss)
-        votes, _ = paged("/house-vote/%d/%s" % (cg, ss), lambda j: find_list(j, "houseRollCallVotes"),
+    for ss in (1, 2):
+        log("House", cg, "session", ss, "- listing votes")
+        votes, _ = paged("/house-vote/%d/%d" % (cg, ss), lambda j: find_list(j, "houseRollCallVotes"),
                          lambda x: x.get("rollCallNumber"))
         log("  found", len(votes), "votes")
         for v in sorted(votes, key=lambda x: x.get("rollCallNumber") or 0):
             roll = v.get("rollCallNumber")
-            if roll is None or (cg, int(ss), roll) in have:
+            if roll is None or (ss, roll) in have:
                 continue
             if added >= max_new:
                 break
             log("Vote", ss, roll)
-            detail, first = paged("/house-vote/%d/%s/%d/members" % (cg, int(ss), roll),
+            detail, first = paged("/house-vote/%d/%d/%d/members" % (cg, ss, roll),
                                   lambda j: ((j or {}).get("houseRollCallVoteMemberVotes") or {}).get("results", []),
                                   lambda m: m["bioguideID"], single=True)
             if not detail:
                 continue  # not published yet; try again next run
             R = (first or {}).get("houseRollCallVoteMemberVotes", {})
             if any(m["bioguideID"] not in members for m in detail) and not refreshed:
-                members = fetch_members(cg)
-                save_json(mem_path, members)
+                members = get_members(cg, force=True)
                 refreshed = True
-            rows, yes, no = [], 0, 0
+            rows = []
             for m in detail:
-                d = members.get(m["bioguideID"])
-                if d is None and m["voteState"] in ATLARGE:
-                    d = 1
-                cast = m.get("voteCast", "")
-                yes += cast.lower() in YES
-                no += cast.lower() in NO
                 rows.append({"id": m["bioguideID"], "first": m.get("firstName", ""),
                              "last": m.get("lastName", ""), "party": m.get("voteParty", ""),
-                             "state": m["voteState"], "district": d, "vote": cast})
+                             "state": m["voteState"],
+                             "district": district_of(members, m["bioguideID"], m["voteState"]),
+                             "vote": m.get("voteCast", "")})
             bill = ((R.get("legislationType") or "") + " " + str(R.get("legislationNumber") or "")).strip()
-            meta = {"congress": cg, "session": int(ss), "roll": roll,
+            meta = {"chamber": "house", "congress": cg, "session": ss, "roll": roll,
                     "date": R.get("startDate") or v.get("startDate"),
                     "question": R.get("voteQuestion") or v.get("voteQuestion"),
                     "result": R.get("result") or v.get("result"),
                     "bill": bill, "billUrl": R.get("legislationUrl"),
                     "amendment": ((R.get("amendmentType") or "") + " " + str(R.get("amendmentNumber") or "")).strip(),
                     "amendmentAuthor": R.get("amendmentAuthor")}
-            fname = "votes/%d-%d-%d.json" % (cg, int(ss), roll)
-            save_json(os.path.join(out_dir, fname), dict(meta, members=rows))
-            index.append(dict(meta, yes=yes, no=no, **tally(rows), file="data/" + fname if out_dir == "data" else fname))
-            have.add((cg, int(ss), roll))
+            p = vote_path("house", cg, ss, roll)
+            save_json(p, dict(meta, members=rows))
+            yes = sum(vkind(r["vote"]) == "Y" for r in rows)
+            no = sum(vkind(r["vote"]) == "N" for r in rows)
+            index.append(dict(meta, yes=yes, no=no, **tally(rows), file=web(p)))
+            have.add((ss, roll))
             added += 1
-            log("saved", fname)
-    index.sort(key=lambda x: (x.get("date") or "", x["roll"]), reverse=True)
-    save_json(index_path, index)
-    print("added %d new vote(s); %d total" % (added, len(index)))
+            log("saved", web(p))
+    for e in index:  # fill in party counts for votes saved by an older version
+        if "dY" not in e:
+            d = load_json(e.get("file", ""), None)
+            if d:
+                e.update(tally(d["members"]))
+    if index:
+        save_index("house", cg, index)
+    log("House %d: added %d new vote(s); %d total" % (cg, added, len(index)))
+
+
+# ---------------------------------------------------------------- Senate
+def norm_bill(s):
+    """'H.R. 5371' -> 'HR 5371', 'S.J.Res. 132' -> 'SJRES 132', 'S.Amdt. 12' -> 'SAMDT 12'."""
+    s = (s or "").strip()
+    m = re.match(r"^([A-Za-z.\s]+?)\s*(\d[\w\-]*)$", s)
+    if not m:
+        return s
+    return re.sub(r"[.\s]", "", m.group(1)).upper() + " " + m.group(2)
+
+
+def parse_senate_date(s):
+    s = re.sub(r"\s+", " ", (s or "").strip())
+    for fmt in ("%B %d, %Y, %I:%M %p", "%B %d, %Y"):
+        try:
+            return datetime.datetime.strptime(s, fmt).isoformat()
+        except ValueError:
+            pass
+    return s
+
+
+def parse_senate(raw, cg, ss):
+    root = ET.fromstring(raw)
+
+    def t(path, node=None):
+        el = (node if node is not None else root).find(path)
+        return (el.text or "").strip() if el is not None and el.text else ""
+
+    roll = int(t("vote_number"))
+    dtype, dnum, dname = t("document/document_type"), t("document/document_number"), t("document/document_name")
+    if dtype == "PN" and dnum:
+        bill = "PN" + dnum
+    elif dname:
+        bill = norm_bill(dname)
+    elif dtype and dnum:
+        bill = norm_bill(dtype + " " + dnum)
+    else:
+        bill = ""
+    amend = norm_bill(t("amendment/amendment_number")) if t("amendment/amendment_number") else ""
+    rows = []
+    for m in root.findall("members/member"):
+        rows.append({"first": t("first_name", m), "last": t("last_name", m),
+                     "party": t("party", m), "state": t("state", m),
+                     "vote": t("vote_cast", m), "district": None})
+    tie = ""
+    if t("tie_breaker/by_whom"):
+        tie = (t("tie_breaker/by_whom") + ": " + t("tie_breaker/tie_breaker_vote")).strip(": ")
+    meta = {"chamber": "senate", "congress": cg, "session": ss, "roll": roll,
+            "date": parse_senate_date(t("vote_date")),
+            "question": t("question") or t("vote_question_text"),
+            "title": t("vote_title"), "result": t("vote_result"),
+            "bill": bill, "billUrl": None, "amendment": amend, "amendmentAuthor": None,
+            "majority": t("majority_requirement"), "tieBreaker": tie}
+    return meta, rows
+
+
+def process_senate(cg, max_new):
+    members = get_members(cg)
+    index = load_index("senate", cg)
+    refreshed = False
+    added = 0
+    for ss in (1, 2):
+        have = {e["roll"] for e in index if e["session"] == ss}
+        top = max(have) if have else 0
+        missing = [n for n in range(1, top + 1) if n not in have]
+        log("Senate", cg, "session", ss, "- checking for new votes after", top)
+
+        def numbers():
+            for n in missing:
+                yield n
+            n = top
+            while True:
+                n += 1
+                yield n
+
+        for n in numbers():
+            if added >= max_new:
+                break
+            url = "%s/vote%d%d/vote_%d_%d_%05d.xml" % (SENATE_BASE, cg, ss, cg, ss, n)
+            raw = fetch_bytes(url)
+            if raw is None:
+                if n <= top:
+                    continue  # a gap that is not available; skip it
+                break
+            try:
+                meta, rows = parse_senate(raw, cg, ss)
+            except Exception as ex:
+                log("  could not read", url, ex)
+                if n <= top:
+                    continue
+                break
+            if not rows:
+                if n <= top:
+                    continue
+                break  # vote page exists but is not filled in yet
+            if any(r["state"] not in {v[2] for v in members.values()} for r in rows) and not refreshed:
+                members = get_members(cg, force=True)
+                refreshed = True
+            for r in rows:
+                r["id"] = senator_id(members, r["state"], r["first"], r["last"])
+            p = vote_path("senate", cg, ss, meta["roll"])
+            save_json(p, dict(meta, members=rows))
+            yes = sum(vkind(r["vote"]) == "Y" for r in rows)
+            no = sum(vkind(r["vote"]) == "N" for r in rows)
+            index.append(dict(meta, yes=yes, no=no, **tally(rows), file=web(p)))
+            added += 1
+            log("saved", web(p))
+    if index:
+        save_index("senate", cg, index)
+    log("Senate %d: added %d new vote(s); %d total" % (cg, added, len(index)))
+
+
+# ---------------------------------------------------------------- member statistics
+def vote_codes(rows):
+    """One character per member for this roll call.
+    y/n   voted Yea/Nay with the majority of their own party
+    Y/N   voted Yea/Nay against the majority of their own party
+    a/b   Yea/Nay, but there is no party majority to compare with (tie, or independent)
+    p     Present      m   Not Voting      -   not on the roll"""
+    cnt = {"D": [0, 0], "R": [0, 0]}
+    for m in rows:
+        p = (m.get("party") or "").upper()
+        k = vkind(m.get("vote"))
+        if p in cnt and k in ("Y", "N"):
+            cnt[p][0 if k == "Y" else 1] += 1
+    maj = {p: ("Y" if c[0] > c[1] else "N" if c[1] > c[0] else None) for p, c in cnt.items()}
+    out = {}
+    for m in rows:
+        p = (m.get("party") or "").upper()
+        k = vkind(m.get("vote"))
+        if k in ("Y", "N"):
+            mj = maj.get(p)
+            if mj:
+                out[m["id"]] = k.lower() if k == mj else k
+            else:
+                out[m["id"]] = "a" if k == "Y" else "b"
+        elif k == "P":
+            out[m["id"]] = "p"
+        elif k == "M":
+            out[m["id"]] = "m"
+        else:
+            out[m["id"]] = "-"
+    return out
+
+
+def stats_of(s):
+    return {"eligible": len(s) - s.count("-"), "missed": s.count("m"), "present": s.count("p"),
+            "against": s.count("Y") + s.count("N"),
+            "partyVotes": sum(s.count(c) for c in "yYnN")}
+
+
+def touch_directory(dirmap, chamber, cg, rows):
+    for m in rows:
+        e = dirmap.setdefault(m["id"], {"id": m["id"], "c": {}})
+        e["first"], e["last"] = m.get("first", ""), m.get("last", "")
+        e["party"], e["state"], e["district"], e["chamber"] = m.get("party", ""), m.get("state", ""), m.get("district"), chamber
+        c = e["c"].setdefault(str(cg), {})
+        c.update({"chamber": chamber, "party": m.get("party", ""), "state": m.get("state", ""),
+                  "district": m.get("district")})
+
+
+def update_matrix(chamber, cg, dirmap):
+    index = load_index(chamber, cg)
+    if not index:
+        return
+    mpath = os.path.join(cdir(chamber, cg), "matrix.json")
+    mx = load_json(mpath, {"votes": [], "members": {}})
+    done = {(v[0], v[1]) for v in mx["votes"]}
+    new = sorted((e for e in index if (e["session"], e["roll"]) not in done),
+                 key=lambda e: (e["session"], e["roll"]))
+    for e in new:
+        d = load_json(vote_path(chamber, cg, e["session"], e["roll"]), None)
+        if not d:
+            continue
+        rows = d["members"]
+        codes = vote_codes(rows)
+        n = len(mx["votes"])
+        for mid in codes:
+            mx["members"].setdefault(mid, "-" * n)
+        for mid in mx["members"]:
+            mx["members"][mid] += codes.get(mid, "-")
+        mx["votes"].append([e["session"], e["roll"]])
+        touch_directory(dirmap, chamber, cg, rows)
+    if new:
+        save_json(mpath, mx)
+    for mid, s in mx["members"].items():
+        e = dirmap.get(mid)
+        if e is not None:
+            e["c"].setdefault(str(cg), {"chamber": chamber}).update(stats_of(s))
+    log("%s %d: statistics cover %d votes and %d members" % (chamber.title(), cg, len(mx["votes"]), len(mx["members"])))
+
+
+def write_congresses():
+    found = {}
+    for ch in ("house", "senate"):
+        d = os.path.join(OUT, ch)
+        if os.path.isdir(d):
+            for name in os.listdir(d):
+                if name.isdigit() and os.path.exists(os.path.join(d, name, "index.json")):
+                    found.setdefault(int(name), []).append(ch)
+    lst = [{"congress": c, "years": years_of(c), "chambers": [x for x in ("house", "senate") if x in chs]}
+           for c, chs in sorted(found.items(), reverse=True)]
+    if lst:
+        save_json(os.path.join(OUT, "congresses.json"), {"latest": lst[0]["congress"], "congresses": lst})
+
+
+# ---------------------------------------------------------------- sponsored / cosponsored legislation
+def update_legislation(dirmap, cgs, budget, refresh_days):
+    if budget <= 0:
+        return
+    today = datetime.date.today()
+    latest = str(max(cgs))
+    ids = [e for e in dirmap.values() if BIOGUIDE.match(e["id"]) and any(str(c) in e["c"] for c in cgs)]
+
+    def key(e):
+        d = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
+        return ((d or {}).get("updated", ""), latest not in e["c"])
+
+    ids.sort(key=key)
+    start = REQS
+    done = 0
+    for e in ids:
+        if REQS - start >= budget:
+            break
+        f = os.path.join(OUT, "legislation", e["id"] + ".json")
+        old = load_json(f, None)
+        if old:
+            try:
+                age = (today - datetime.date.fromisoformat(old.get("updated", "1970-01-01"))).days
+            except ValueError:
+                age = 9999
+            if age < refresh_days:
+                continue
+        data = {"updated": today.isoformat(), "congresses": {}}
+        try:
+            for kind, k in (("sponsored", "sponsoredLegislation"), ("cosponsored", "cosponsoredLegislation")):
+                items, _ = paged("/member/%s/%s-legislation" % (e["id"], kind),
+                                 lambda j, k=k: find_list(j, k),
+                                 lambda x: (x.get("congress"), x.get("type"), x.get("number")),
+                                 max_pages=40, quiet=True)
+                for x in items:
+                    cg = x.get("congress")
+                    if cg in cgs:
+                        slot = data["congresses"].setdefault(str(cg), {"sponsored": [], "cosponsored": []})
+                        slot[kind].append({"type": x.get("type"), "number": str(x.get("number")),
+                                           "title": (x.get("title") or "")[:300],
+                                           "date": x.get("introducedDate")})
+        except Exception as ex:
+            log("  legislation failed for", e["id"], ex)
+            continue
+        for slot in data["congresses"].values():
+            for kind in ("sponsored", "cosponsored"):
+                slot[kind].sort(key=lambda x: x.get("date") or "", reverse=True)
+        save_json(f, data)
+        done += 1
+    log("Legislation: refreshed %d member(s) using %d requests" % (done, REQS - start))
+
+
+# ---------------------------------------------------------------- main
+def main():
+    migrate_legacy()
+    env = os.environ.get("CONGRESSES", "").strip()
+    cur = current_congress()
+    cgs = sorted(int(x) for x in env.split(",") if x.strip()) if env else [cur - 1, cur]
+    max_new = int(os.environ.get("MAX_NEW", "400"))
+    dpath = os.path.join(OUT, "members", "directory.json")
+    dirmap = {e["id"]: e for e in load_json(dpath, [])}
+    for cg in cgs:
+        process_house(cg, max_new)
+        process_senate(cg, max_new)
+        update_matrix("house", cg, dirmap)
+        update_matrix("senate", cg, dirmap)
+    save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))
+    write_congresses()
+    update_legislation(dirmap, cgs, int(os.environ.get("LEG_BUDGET", "1200")),
+                       int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    log("Done.")
 
 
 if __name__ == "__main__":
