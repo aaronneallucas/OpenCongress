@@ -31,6 +31,7 @@
   <h2>Voting map</h2>
   <div class="ctl"><input id="mq" type="search" placeholder="Find a member on the map" style="flex:1 1 260px;max-width:380px;width:auto"><span class="small" id="mn" style="margin:0"></span></div>
   <div class="ctl">
+    <label>Layout <select id="lay"><option value="network">Network (spread out)</option><option value="axes">Axes (two patterns)</option></select></label>
     <label><input type="checkbox" id="econ" checked style="width:auto"> Show connections</label>
     <label>Minimum agreement <input type="range" id="emin" min="0" max="100" step="1" value="0" style="width:160px;padding:0;vertical-align:middle"> <b id="eval">0%</b></label>
     <span class="small" id="ecount" style="margin:0"></span>
@@ -80,36 +81,111 @@ function pca(ids){
   return comps.map(function(v){return mulX(v)});
 }
 
+var W=900,H=520,PAD=30,MODE="network",MAPIDS=[],EDGES=[],AGM=null,IX={},HOVER=null,SEARCH=null,OFF=null,EKEY="";
+var ECOL={DD:["#1f4e9c","Democrat to Democrat"],RR:["#b21f1f","Republican to Republican"],DR:["#8a8a8a","Democrat to Republican"],I:["#5b2a86","Independent to anyone"]};
+function eclass(a,b){var x=pcode(BYID[a].c[CG].party),y=pcode(BYID[b].c[CG].party);
+  if(x==="I"||y==="I")return"I";if(x==="D"&&y==="D")return"DD";if(x==="R"&&y==="R")return"RR";return"DR"}
+
+/* ---- how alike every pair voted (all pairs, kept in a matrix and a sorted list) ---- */
+function computeEdges(){
+  var ids=MAPIDS,n=ids.length,key=CH+"-"+CG+"-"+n;
+  if(key===EKEY)return;EKEY=key;
+  var V=MX.votes.length,S=[],cast=[],i,j,k;
+  for(i=0;i<n;i++){var str=MX.members[ids[i]],a=new Int8Array(V),c=0;for(k=0;k<V;k++){a[k]=Site.sgn(str[k]);if(a[k])c++}S.push(a);cast.push(c)}
+  EDGES=[];AGM=new Float32Array(n*n);AGM.fill(NaN);
+  for(i=0;i<n;i++)for(j=i+1;j<n;j++){
+    var A=S[i],B=S[j],same=0,com=0;
+    for(k=0;k<V;k++){var x=A[k],y=B[k];if(x&&y){com++;if(x===y)same++}}
+    if(com>=Math.max(10,0.5*Math.min(cast[i],cast[j]))){var pc=100*same/com;AGM[i*n+j]=pc;AGM[j*n+i]=pc;EDGES.push([i,j,pc,com])}}
+  EDGES.sort(function(a,b){return a[2]-b[2]||a[3]-b[3]});
+}
+
+/* ---- layout 1: the two strongest voting patterns, stretched so each party is not one blob ---- */
+function axesLayout(ids){
+  var sc=pca(ids),n=ids.length,i;
+  var sd=0,nd=0,sr=0,nr=0;
+  ids.forEach(function(id,i){var p=pcode(BYID[id].c[CG].party);if(p==="D"){sd+=sc[0][i];nd++}else if(p==="R"){sr+=sc[0][i];nr++}});
+  if(nd&&nr&&sd/nd>sr/nr)for(i=0;i<n;i++)sc[0][i]=-sc[0][i];
+  var s2=0;for(i=0;i<n;i++)if(sc[0][i]>0)s2+=sc[1][i];
+  if(s2<0)for(i=0;i<n;i++)sc[1][i]=-sc[1][i];
+  var u=[],v=[],mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9;
+  for(i=0;i<n;i++){mnx=Math.min(mnx,sc[0][i]);mxx=Math.max(mxx,sc[0][i]);mny=Math.min(mny,sc[1][i]);mxy=Math.max(mxy,sc[1][i])}
+  for(i=0;i<n;i++){u.push((sc[0][i]-mnx)/((mxx-mnx)||1));v.push((sc[1][i]-mny)/((mxy-mny)||1))}
+  var grp={D:[],R:[]};
+  ids.forEach(function(id,i){var p=pcode(BYID[id].c[CG].party);if(grp[p])grp[p].push(i)});
+  [u,v].forEach(function(arr){["D","R"].forEach(function(p){
+    var ix=grp[p];if(ix.length<3)return;
+    var vals=ix.map(function(i){return arr[i]}),lo=Math.min.apply(null,vals),hi=Math.max.apply(null,vals),span=(hi-lo)||1;
+    var order=ix.slice().sort(function(a,b){return arr[a]-arr[b]}),rank={};
+    order.forEach(function(i,r){rank[i]=r/(order.length-1)});
+    ix.forEach(function(i){arr[i]=lo+span*(0.3*(arr[i]-lo)/span+0.7*rank[i])})})});
+  return {x:u.map(function(a){return PAD+a*(W-2*PAD)}),y:v.map(function(a){return H-PAD-a*(H-2*PAD)})};
+}
+/* ---- layout 2: network. Each member is pulled toward the colleagues they vote most like and pushed away from everyone ---- */
+function networkLayout(ids){
+  var a=axesLayout(ids),X=a.x.slice(),Y=a.y.slice(),n=ids.length,i,j,links=[];
+  for(i=0;i<n;i++){
+    var pi=pcode(BYID[ids[i]].c[CG].party),same=[],cross=[];
+    for(j=0;j<n;j++){if(j===i)continue;var p=AGM[i*n+j];if(p!==p)continue;
+      ((pi==="I"||pcode(BYID[ids[j]].c[CG].party)===pi)?same:cross).push([j,p])}
+    same.sort(function(x,y){return y[1]-x[1]});cross.sort(function(x,y){return y[1]-x[1]});
+    same.slice(0,8).forEach(function(c){links.push([i,c[0],1])});
+    cross.slice(0,2).forEach(function(c){links.push([i,c[0],0.25])});
+  }
+  var area=(W-2*PAD)*(H-2*PAD),k=0.85*Math.sqrt(area/n),T0=W/12,iters=n>200?260:400,dx=new Float64Array(n),dy=new Float64Array(n);
+  for(var it=0;it<iters;it++){
+    dx.fill(0);dy.fill(0);
+    for(i=0;i<n;i++)for(j=i+1;j<n;j++){
+      var ex=X[i]-X[j],ey=Y[i]-Y[j],f=k*k/(ex*ex+ey*ey+0.01);
+      dx[i]+=ex*f;dy[i]+=ey*f;dx[j]-=ex*f;dy[j]-=ey*f}
+    for(var q=0;q<links.length;q++){var l=links[q],lx=X[l[0]]-X[l[1]],ly=Y[l[0]]-Y[l[1]],g=l[2]*(Math.sqrt(lx*lx+ly*ly)+0.01)/k;
+      dx[l[0]]-=lx*g;dy[l[0]]-=ly*g;dx[l[1]]+=lx*g;dy[l[1]]+=ly*g}
+    var t=T0*(1-it/iters)+0.3;
+    for(i=0;i<n;i++){var m=Math.sqrt(dx[i]*dx[i]+dy[i]*dy[i])||1,sc=Math.min(m,t)/m;
+      X[i]=Math.max(PAD,Math.min(W-PAD,X[i]+dx[i]*sc));Y[i]=Math.max(PAD,Math.min(H-PAD,Y[i]+dy[i]*sc))}
+  }
+  var mnx=Math.min.apply(null,X),mxx=Math.max.apply(null,X),mny=Math.min.apply(null,Y),mxy=Math.max.apply(null,Y);
+  for(i=0;i<n;i++){X[i]=PAD+(X[i]-mnx)/((mxx-mnx)||1)*(W-2*PAD);Y[i]=PAD+(Y[i]-mny)/((mxy-mny)||1)*(H-2*PAD)}
+  return {x:X,y:Y};
+}
+/* nudge overlapping dots apart so none sit on top of each other */
+function declump(X,Y,r){
+  var n=X.length,min=2*r+1.5,i,j;
+  for(var it=0;it<40;it++){
+    var moved=0;
+    for(i=0;i<n;i++)for(j=i+1;j<n;j++){
+      var dx=X[j]-X[i],dy=Y[j]-Y[i],d2=dx*dx+dy*dy;
+      if(d2<min*min){var d=Math.sqrt(d2);if(d<0.01){dx=Math.cos(i*2.4);dy=Math.sin(i*2.4);d=1}
+        var push=(min-d)/2/d;X[i]-=dx*push;Y[i]-=dy*push;X[j]+=dx*push;Y[j]+=dy*push;moved++}}
+    for(i=0;i<n;i++){X[i]=Math.max(PAD,Math.min(W-PAD,X[i]));Y[i]=Math.max(PAD,Math.min(H-PAD,Y[i]))}
+    if(!moved)break}
+}
+
 function drawMap(){
   var el=document.getElementById("map");
   var need=0;LIST.forEach(function(e){need=Math.max(need,Site.castCount(MX.members[e.id]||""))});
   var ids=LIST.filter(function(e){return Site.castCount(MX.members[e.id]||"")>=0.3*need}).map(function(e){return e.id});
   var skipped=LIST.length-ids.length;
   if(ids.length<5){el.innerHTML='<p class="small">Not enough votes saved yet to draw a map.</p>';return}
-  var sc=pca(ids),W=900,H=520,P=30;
-  /* orient: Democrats left, and give the second axis a fixed direction */
-  var sd=0,nd=0,sr=0,nr=0;
-  ids.forEach(function(id,i){var p=pcode(BYID[id].c[CG].party);if(p==="D"){sd+=sc[0][i];nd++}else if(p==="R"){sr+=sc[0][i];nr++}});
-  if(nd&&nr&&sd/nd>sr/nr)for(var i=0;i<ids.length;i++)sc[0][i]=-sc[0][i];
-  var s2=0;for(i=0;i<ids.length;i++)if(sc[0][i]>0)s2+=sc[1][i];
-  if(s2<0)for(i=0;i<ids.length;i++)sc[1][i]=-sc[1][i];
-  var mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9;
-  for(i=0;i<ids.length;i++){mnx=Math.min(mnx,sc[0][i]);mxx=Math.max(mxx,sc[0][i]);mny=Math.min(mny,sc[1][i]);mxy=Math.max(mxy,sc[1][i])}
-  var rx=(mxx-mnx)||1,ry=(mxy-mny)||1;POS={};
-  var g="",party={D:[],R:[],I:[]};
-  ids.forEach(function(id,i){
-    var x=P+(sc[0][i]-mnx)/rx*(W-2*P),y=H-P-(sc[1][i]-mny)/ry*(H-2*P);
-    POS[id]=[x,y];party[pcode(BYID[id].c[CG].party)].push(id)});
+  HOVER=null;MAPIDS=ids;IX={};ids.forEach(function(id,i){IX[id]=i});
+  computeEdges();
+  var L=MODE==="axes"?axesLayout(ids):networkLayout(ids),R=CH==="senate"?6:4.5;
+  declump(L.x,L.y,R);
+  POS={};var party={D:[],R:[],I:[]};
+  ids.forEach(function(id,i){POS[id]=[L.x[i],L.y[i]];party[pcode(BYID[id].c[CG].party)].push(id)});
   var dots="";
   ["D","I","R"].forEach(function(p){party[p].forEach(function(id){
-    dots+='<circle class="dot" data-id="'+esc(id)+'" cx="'+POS[id][0].toFixed(1)+'" cy="'+POS[id][1].toFixed(1)+'" r="'+(CH==="senate"?6:4.5)+'" fill="'+PCOL[p]+'" fill-opacity="1" stroke="#fff" stroke-width="1.2"/>'})});
-  g+='<g id="hov"></g>'+dots;
-  g+='<text x="'+P+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66">← votes more with the Democratic majority</text>'+
-     '<text x="'+(W-P)+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66" text-anchor="end">votes more with the Republican majority →</text>';
+    dots+='<circle class="dot" data-id="'+esc(id)+'" cx="'+POS[id][0].toFixed(1)+'" cy="'+POS[id][1].toFixed(1)+'" r="'+R+'" fill="'+PCOL[p]+'" stroke="#fff" stroke-width="1.2"/>'})});
+  var g=dots;
+  if(MODE==="axes")g+='<text x="'+PAD+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66">← votes more with the Democratic majority</text>'+
+     '<text x="'+(W-PAD)+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66" text-anchor="end">votes more with the Republican majority →</text>';
   el.innerHTML='<svg viewBox="0 0 '+W+" "+H+'" role="img" aria-label="Voting map of members">'+g+'</svg>';
   document.getElementById("mleg").innerHTML=["D","R","I"].filter(function(p){return party[p].length}).map(function(p){
     return'<span><i class="sw" style="background:'+PCOL[p]+'"></i>'+PN[p]+" ("+party[p].length+")</span>"}).join("");
-  document.getElementById("mnote").textContent="Each dot is a member. Dots that are closer together voted more alike on roll calls in the "+Site.ordinal(CG)+" Congress. Positions come only from the votes (the two strongest patterns in how members voted), so the axes have no units. The horizontal axis mostly separates the parties; the vertical axis shows the next biggest pattern." + (skipped?" "+skipped+" member(s) who cast too few Yea/Nay votes are left off.":"");
+  document.getElementById("mnote").textContent=(MODE==="axes"
+    ?"Each dot is a member. Positions come from the two strongest patterns in how members voted; the horizontal axis mostly separates the parties and the vertical axis shows the next biggest pattern. Within each party the dots are spread out so they do not pile up, so distances are not to scale."
+    :"Each dot is a member. Members are pulled toward the colleagues they vote most like and pushed away from everyone else, so dots that are closer together generally voted more alike. Directions and exact distances have no meaning, and the picture is only a summary of the votes.")+
+    " Hover a member to light up all of their connections." + (skipped?" "+skipped+" member(s) who cast too few Yea/Nay votes are left off.":"");
   var svg=el.querySelector("svg"),tip=document.getElementById("mtip"),wrap=document.getElementById("mapwrap");
   svg.addEventListener("mousemove",function(e){
     var d=e.target.closest&&e.target.closest(".dot");
@@ -119,58 +195,65 @@ function drawMap(){
     tip.style.display="block";
     var l=e.clientX-r.left+14;if(l+tip.offsetWidth>r.width)l=e.clientX-r.left-tip.offsetWidth-14;
     tip.style.left=Math.max(0,l)+"px";tip.style.top=Math.max(0,e.clientY-r.top-10)+"px"});
-  svg.addEventListener("mouseleave",function(){tip.style.display="none"});
+  svg.addEventListener("mouseover",function(e){var d=e.target.closest&&e.target.closest(".dot");setHover(d?d.dataset.id:null)});
+  svg.addEventListener("mouseleave",function(){tip.style.display="none";setHover(null)});
   svg.addEventListener("click",function(e){var d=e.target.closest&&e.target.closest(".dot");if(d)location.href=Site.memberHref(d.dataset.id,CG)});
-  MAPIDS=ids;computeEdges();drawEdges();
-  svg.addEventListener("mouseover",function(e){var d=e.target.closest&&e.target.closest(".dot");showHover(d?d.dataset.id:null)});
-  svg.addEventListener("mouseleave",function(){showHover(null)});
+  drawEdges();
   highlight();
 }
 
-/* ---- connections: line thickness shows how often two members voted the same way ---- */
-var MAPIDS=[],EDGES=[],ECOL={DD:["#1f4e9c","Democrat to Democrat"],RR:["#b21f1f","Republican to Republican"],DR:["#8a8a8a","Democrat to Republican"],I:["#5b2a86","Independent to anyone"]};
-function eclass(a,b){var x=pcode(BYID[a].c[CG].party),y=pcode(BYID[b].c[CG].party);
-  if(x==="I"||y==="I")return"I";if(x==="D"&&y==="D")return"DD";if(x==="R"&&y==="R")return"RR";return"DR"}
-function computeEdges(){
-  var ids=MAPIDS,n=ids.length,V=MX.votes.length,S=[],cast=[],i,j,k;
-  for(i=0;i<n;i++){var str=MX.members[ids[i]],a=new Int8Array(V),c=0;for(k=0;k<V;k++){a[k]=Site.sgn(str[k]);if(a[k])c++}S.push(a);cast.push(c)}
-  EDGES=[];
-  for(i=0;i<n;i++)for(j=i+1;j<n;j++){
-    var A=S[i],B=S[j],same=0,com=0;
-    for(k=0;k<V;k++){var x=A[k],y=B[k];if(x&&y){com++;if(x===y)same++}}
-    if(com>=Math.max(10,0.5*Math.min(cast[i],cast[j]))){EDGES.push([ids[i],ids[j],100*same/com,com])}}
-  EDGES.sort(function(a,b){return a[2]-b[2]||a[3]-b[3]});
-}
-function line(a,b,w,op,col){
-  var p=POS[a],q=POS[b];
-  return'<line x1="'+p[0].toFixed(1)+'" y1="'+p[1].toFixed(1)+'" x2="'+q[0].toFixed(1)+'" y2="'+q[1].toFixed(1)+'" stroke="'+col+'" stroke-width="'+w.toFixed(2)+'" stroke-opacity="'+op+'" stroke-linecap="round"/>'}
-function drawEdges(){
-  var cv=document.getElementById("ecv"),ctx=cv.getContext("2d"),on=document.getElementById("econ").checked,thr=parseInt(document.getElementById("emin").value,10);
+/* ---- connections: line thickness and darkness show how often two members voted the same way ---- */
+function strokeLine(ctx,sx,sy,a,b,col,alpha,w){
+  ctx.strokeStyle=col;ctx.globalAlpha=alpha;ctx.lineWidth=w*2;
+  ctx.beginPath();ctx.moveTo(POS[a][0]*sx,POS[a][1]*sy);ctx.lineTo(POS[b][0]*sx,POS[b][1]*sy);ctx.stroke()}
+function drawEdges(){          /* rebuild the base layer of all connections */
+  var cv=document.getElementById("ecv"),on=document.getElementById("econ").checked,thr=parseInt(document.getElementById("emin").value,10);
   document.getElementById("eval").textContent=thr+"%"+(thr===0?" (all connections)":"");
-  var leg=document.getElementById("eleg"),sx=cv.width/900,sy=cv.height/520;
-  ctx.clearRect(0,0,cv.width,cv.height);
-  if(!on||!EDGES.length){document.getElementById("ecount").textContent="";leg.innerHTML="";return}
+  if(!OFF){OFF=document.createElement("canvas")}
+  OFF.width=cv.width;OFF.height=cv.height;
+  var ctx=OFF.getContext("2d"),sx=cv.width/W,sy=cv.height/H,leg=document.getElementById("eleg");
   var per={DD:0,RR:0,DR:0,I:0},shown=0;
-  ctx.lineCap="round";
-  EDGES.forEach(function(e){            /* weakest first, so the strongest lines end up on top */
-    if(e[2]<thr)return;
-    var c=eclass(e[0],e[1]),p=e[2]/100,q=p*p*p,a=POS[e[0]],b=POS[e[1]];
-    per[c]++;shown++;
-    ctx.strokeStyle=ECOL[c][0];ctx.globalAlpha=0.006+0.2*q;ctx.lineWidth=(0.1+0.7*q)*2;
-    ctx.beginPath();ctx.moveTo(a[0]*sx,a[1]*sy);ctx.lineTo(b[0]*sx,b[1]*sy);ctx.stroke()});
-  ctx.globalAlpha=1;
-  document.getElementById("ecount").textContent=shown.toLocaleString()+" connection"+(shown===1?"":"s");
-  leg.innerHTML=Object.keys(ECOL).filter(function(c){return per[c]||c!=="I"}).map(function(c){return'<span><i class="sw" style="background:'+ECOL[c][0]+';height:3px;margin-top:4px"></i>'+ECOL[c][1]+" ("+per[c].toLocaleString()+")</span>"}).join("")+
-    '<span style="color:var(--muted)">Thicker, darker line = voted alike more often; weak ties are very faint</span>';
+  if(on&&EDGES.length){
+    ctx.lineCap="round";
+    EDGES.forEach(function(e){            /* weakest first, so the strongest lines end up on top */
+      if(e[2]<thr)return;
+      var a=MAPIDS[e[0]],b=MAPIDS[e[1]],c=eclass(a,b),p=e[2]/100,q=p*p*p;
+      per[c]++;shown++;
+      strokeLine(ctx,sx,sy,a,b,ECOL[c][0],0.006+0.2*q,0.1+0.7*q)});
+    ctx.globalAlpha=1;
+    document.getElementById("ecount").textContent=shown.toLocaleString()+" connection"+(shown===1?"":"s");
+    leg.innerHTML=Object.keys(ECOL).filter(function(c){return per[c]||c!=="I"}).map(function(c){return'<span><i class="sw" style="background:'+ECOL[c][0]+';height:3px;margin-top:4px"></i>'+ECOL[c][1]+" ("+per[c].toLocaleString()+")</span>"}).join("")+
+      '<span style="color:var(--muted)">Thicker, darker line = voted alike more often; weak ties are very faint. Hover a member to see all of their connections.</span>';
+  }else{document.getElementById("ecount").textContent="";leg.innerHTML=""}
+  paintEdges();
 }
-function showHover(id){
-  var h=document.querySelector("#hov");if(!h)return;
-  if(!id||!document.getElementById("econ").checked){h.innerHTML="";return}
-  var mine=EDGES.filter(function(e){return e[0]===id||e[1]===id}),cls={};
-  var pick=[];
-  mine.forEach(function(e){var o=e[0]===id?e[1]:e[0],c=eclass(id,o);cls[c]=(cls[c]||0)+1;
-    if(cls[c]<=(c==="DD"||c==="RR"?20:8))pick.push([e,c])});
-  h.innerHTML=pick.map(function(x){var e=x[0],w=0.7+1.3*Math.pow(e[2]/100,3);return line(e[0],e[1],w,.9,ECOL[x[1]][0])}).join("");
+function paintEdges(){         /* show the base layer, or fade it and light up the hovered member's connections */
+  var cv=document.getElementById("ecv"),ctx=cv.getContext("2d"),sx=cv.width/W,sy=cv.height/H;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!OFF)return;
+  if(!HOVER){ctx.drawImage(OFF,0,0);return}
+  ctx.globalAlpha=0.08;ctx.drawImage(OFF,0,0);
+  var n=MAPIDS.length,i=IX[HOVER],mine=[],j;
+  for(j=0;j<n;j++){if(j===i)continue;var p=AGM[i*n+j];if(p===p)mine.push([j,p])}
+  mine.sort(function(a,b){return a[1]-b[1]});
+  ctx.lineCap="round";
+  mine.forEach(function(m){
+    var o=MAPIDS[m[0]],c=eclass(HOVER,o),p=m[1]/100;
+    strokeLine(ctx,sx,sy,HOVER,o,ECOL[c][0],0.07+0.8*p*p,0.35+1.7*p*p*p)});
+  ctx.globalAlpha=1;
+}
+function setHover(id){
+  if(id===HOVER)return;
+  HOVER=id;paintEdges();applyDots();
+}
+function applyDots(){
+  var svg=document.querySelector("#map svg");if(!svg)return;
+  var n=MAPIDS.length;
+  svg.querySelectorAll(".dot").forEach(function(d){
+    var id=d.dataset.id,o=(SEARCH&&!SEARCH[id])?0.12:1;
+    if(HOVER&&id!==HOVER){var p=AGM[IX[HOVER]*n+IX[id]];p=(p===p)?p/100:0;o*=0.1+0.9*p*p}
+    d.setAttribute("fill-opacity",o);d.setAttribute("stroke-opacity",Math.max(o,0.15));
+    d.setAttribute("stroke",id===HOVER?"#222":"#fff");d.setAttribute("stroke-width",id===HOVER?2:1.2)});
 }
 function highlight(){
   var q=document.getElementById("mq").value.toLowerCase().split(/\s+/).filter(Boolean),svg=document.querySelector("#map svg");
@@ -180,9 +263,9 @@ function highlight(){
     if(!POS[e.id])return;var c=e.c[CG],hay=(e.first+" "+e.last+" "+c.state).toLowerCase();
     if(q.every(function(t){return hay.indexOf(t)>-1}))hits.push(e)});
   document.getElementById("mn").textContent=q.length?(hits.length===1?"1 match (circled in gold)":hits.length+" matches"):"";
-  if(svg)svg.querySelectorAll(".dot").forEach(function(d){
-    var on=!q.length||hits.some(function(h){return h.id===d.dataset.id});
-    d.setAttribute("fill-opacity",on?"1":".12")});
+  SEARCH=null;
+  if(q.length){SEARCH={};hits.forEach(function(h){SEARCH[h.id]=1})}
+  applyDots();
   if(svg&&hits.length===1){var p=POS[hits[0].id];
     svg.insertAdjacentHTML("beforeend",'<circle id="ring" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="11" fill="none" stroke="#f2b300" stroke-width="3" pointer-events="none"/>')}
 }
@@ -211,6 +294,7 @@ function comparePair(){
 document.getElementById("pa").oninput=comparePair;document.getElementById("pb").oninput=comparePair;
 document.getElementById("mq").oninput=highlight;
 document.getElementById("econ").onchange=drawEdges;
+document.getElementById("lay").onchange=function(){MODE=this.value;SEARCH=SEARCH;drawMap()};
 document.getElementById("emin").oninput=drawEdges;
 
 async function load(){
