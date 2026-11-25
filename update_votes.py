@@ -429,8 +429,28 @@ def parse_senate_date(s):
     return s
 
 
+def senate_root(raw):
+    """Parse a senate.gov roll call page. senate.gov sometimes answers with an HTML 'not available' page
+    instead of a 404, and a few vote files contain stray characters; reject the first and repair the second."""
+    head = raw.lstrip()[:200].lower()
+    if not (head.startswith(b"<?xml") or b"<roll_call_vote" in head):
+        raise ValueError("senate.gov returned a page that is not vote data (the vote is probably not available)")
+    try:
+        return ET.fromstring(raw)
+    except ET.ParseError:
+        pass
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    text = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)", "&amp;", text)
+    text = re.sub(r"^<\?xml[^>]*\?>", "", text.lstrip())
+    return ET.fromstring(text)
+
+
 def parse_senate(raw, cg, ss):
-    root = ET.fromstring(raw)
+    root = senate_root(raw)
 
     def t(path, node=None):
         el = (node if node is not None else root).find(path)
@@ -483,26 +503,32 @@ def process_senate(cg, max_new):
                 n += 1
                 yield n
 
+        misses = 0  # consecutive unavailable votes past the last known one
         for n in numbers():
             if added >= max_new:
                 break
             url = "%s/vote%d%d/vote_%d_%d_%05d.xml" % (SENATE_BASE, cg, ss, cg, ss, n)
             raw = fetch_bytes(url)
+            bad = None
             if raw is None:
+                bad = "not found"
+            else:
+                try:
+                    meta, rows = parse_senate(raw, cg, ss)
+                    if not rows:
+                        bad = "no member votes listed yet"
+                except Exception as ex:
+                    bad = "could not read (%s)" % ex
+            if bad:
                 if n <= top:
-                    continue  # a gap that is not available; skip it
-                break
-            try:
-                meta, rows = parse_senate(raw, cg, ss)
-            except Exception as ex:
-                log("  could not read", url, ex)
-                if n <= top:
-                    continue
-                break
-            if not rows:
-                if n <= top:
-                    continue
-                break  # vote page exists but is not filled in yet
+                    continue  # a gap that is still not available; it is retried on later runs
+                misses += 1
+                if raw is not None:
+                    log("  Senate vote %d: %s" % (n, bad))
+                if misses >= 3:
+                    break  # three in a row past the last vote: we have reached the end
+                continue
+            misses = 0
             if any(r["state"] not in {v[2] for v in members.values()} for r in rows) and not refreshed:
                 members = get_members(cg, force=True)
                 refreshed = True
