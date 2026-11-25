@@ -45,8 +45,9 @@ def log(*a):
     print(*a, flush=True)
 
 
-def paged(path, finder, keyfn, max_pages=20):
-    """Fetch every page. Stops when a page is short, repeats itself, or adds nothing new."""
+def paged(path, finder, keyfn, max_pages=20, single=False):
+    """Fetch every page. Stops when a page is short, repeats itself, or adds nothing new.
+    single=True fetches just one request (the vote members endpoint returns everyone at once)."""
     items, seen, offset, first = [], set(), 0, None
     for _ in range(max_pages):
         log("  GET", path, "offset", offset)
@@ -57,7 +58,7 @@ def paged(path, finder, keyfn, max_pages=20):
         new = [x for x in page if keyfn(x) not in seen]
         seen.update(keyfn(x) for x in new)
         items += new
-        if len(page) < 250 or not new:
+        if single or len(page) < 250 or not new:
             break
         offset += 250
     return items, first
@@ -125,7 +126,7 @@ def main():
             log("Vote", ss, roll)
             detail, first = paged("/house-vote/%d/%s/%d/members" % (cg, int(ss), roll),
                                   lambda j: ((j or {}).get("houseRollCallVoteMemberVotes") or {}).get("results", []),
-                                  lambda m: m["bioguideID"])
+                                  lambda m: m["bioguideID"], single=True)
             if not detail:
                 continue  # not published yet; try again next run
             R = (first or {}).get("houseRollCallVoteMemberVotes", {})
