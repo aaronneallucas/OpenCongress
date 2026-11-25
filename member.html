@@ -19,22 +19,32 @@
   <button data-t="votes" class="on">Voting record</button>
   <button data-t="spons">Sponsored</button>
   <button data-t="cospons">Cosponsored</button>
+  <button data-t="sim">Similar members</button>
 </div>
 
 <div id="p-votes">
   <div class="chips" id="vf"></div>
   <input id="vq" type="search" placeholder="Search this member's votes (bill, topic, roll number)" style="margin-bottom:10px">
-  <div class="tblwrap"><table class="tbl"><thead><tr><th>Date</th><th>Vote</th><th>Description</th><th>Result</th><th>Member voted</th><th>vs. party</th></tr></thead><tbody id="vb"></tbody></table></div>
+  <div class="tblwrap"><table class="tbl"><thead><tr><th>Date</th><th>Vote</th><th>Description</th><th>Result</th><th>Member voted</th><th>vs. party</th><th>Maverick pts</th></tr></thead><tbody id="vb"></tbody></table></div>
   <p class="small" id="vc"></p>
   <button id="vmore" style="display:none">Show more</button>
 </div>
 <div id="p-spons" style="display:none"><p class="small" id="sh"></p><ul class="blist" id="sl"></ul></div>
 <div id="p-cospons" style="display:none"><p class="small" id="ch"></p><ul class="blist" id="cl"></ul></div>
 
+<div id="p-sim" style="display:none">
+  <p class="small" id="simh"></p>
+  <div class="cards" id="simcards"></div>
+  <div class="two">
+    <div><h2 class="cy">Votes most like this member</h2><ul class="blist" id="simtop"></ul></div>
+    <div><h2 class="cn">Votes least like this member</h2><ul class="blist" id="simlow"></ul></div>
+  </div>
+  <p class="small"><a id="simlink" href="relationships.html">Compare this member with anyone, or see the voting map &rarr;</a></p>
+</div>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var esc=Site.esc,ME=null,CG=119,CH="house",MX=null,IDX={},VROWS=[],vfilter="all",shown=100,LEG=null;
+var esc=Site.esc,R=null,DIR=null,ME=null,CG=119,CH="house",MX=null,IDX={},VROWS=[],vfilter="all",shown=100,LEG=null;
 
 function count(s,chars){var n=0;for(var i=0;i<s.length;i++)if(chars.indexOf(s[i])>-1)n++;return n}
 function pctText(n,d){return d?(100*n/d).toFixed(1)+"%":"—"}
@@ -42,11 +52,13 @@ var LABEL={y:["YES","cy"],Y:["YES","cy"],a:["YES","cy"],n:["NO","cn"],N:["NO","c
 
 function cards(s){
   var elig=s.length-count(s,"-"),missed=count(s,"m"),present=count(s,"p"),
-      against=count(s,"YN"),pv=count(s,"yYnN"),yes=count(s,"yYa"),no=count(s,"nNb");
+      against=count(s,"YN"),pv=count(s,"yYnN"),yes=count(s,"yYa"),no=count(s,"nNb"),
+      mav=(ME.c[CG].maverick||0),rk=function(k){return R?Site.rankText(R,k,ME.id):"\u2014"};
   document.getElementById("cards").innerHTML=[
     ["Roll calls on the record",elig,"while serving in this Congress"],
-    ["Missed votes",missed,pctText(missed,elig)+" of roll calls"],
-    ["Against own party",against,pv?pctText(against,pv)+" of "+pv+" votes with a party majority":"No party majority to compare"],
+    ["Missed votes",missed,pctText(missed,elig)+" of roll calls \u00b7 rank "+rk("missed")],
+    ["Against own party",against,pv?pctText(against,pv)+" of "+pv+" votes with a party majority \u00b7 rank "+rk("against"):"No party majority to compare"],
+    ["Maverick score",pv?mav.toLocaleString():"\u2014",pv?"Rank "+rk("maverick")+" among "+Site.chamberName(CH)+" members":"Not scored (no party majority)"],
     ["Voted YES / NO",yes+" / "+no,present?present+" Present":"No Present votes"]
   ].map(function(c){return'<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div><div class="d">'+c[2]+"</div></div>"}).join("");}
 
@@ -63,12 +75,12 @@ function drawVotes(){
     return q.every(function(t){return hay.indexOf(t)>-1});
   });
   document.getElementById("vb").innerHTML=rows.slice(0,shown).map(function(r){
-    var v=r.v,l=LABEL[r.code],rel="—";
+    var v=r.v,l=LABEL[r.code],rel="—",mp=Site.mavPoints(v,ME.c[CG].party,r.code);
     if("yn".indexOf(r.code)>-1)rel="With party";
     if("YN".indexOf(r.code)>-1)rel='<b>Against party</b>';
     return"<tr><td>"+esc(Site.fmtDate(v.date))+'</td><td><a href="'+Site.voteHref(CH,CG,v.session,v.roll)+'">Roll '+v.roll+"</a></td><td>"+
       (v.bill?"<b>"+esc(v.bill)+"</b> · ":"")+esc(v.question||"")+(v.title&&v.title!==v.question?'<div class="small" style="margin:0">'+esc(v.title)+"</div>":"")+"</td><td>"+esc(v.result||"")+
-      '</td><td class="'+l[1]+'"><b>'+l[0]+"</b></td><td>"+rel+"</td></tr>"}).join("");
+      '</td><td class="'+l[1]+'"><b>'+l[0]+"</b></td><td>"+rel+"</td><td>"+(mp?mp:"—")+"</td></tr>"}).join("");
   document.getElementById("vc").textContent=rows.length+" of "+VROWS.length+" roll calls";
   document.getElementById("vmore").style.display=rows.length>shown?"inline-block":"none";}
 
@@ -83,21 +95,42 @@ function drawBills(kind,listId,headId){
 
 function showTab(t){
   document.querySelectorAll("#ptabs button").forEach(function(b){b.classList.toggle("on",b.dataset.t===t)});
-  ["votes","spons","cospons"].forEach(function(x){document.getElementById("p-"+x).style.display=x===t?"":"none"});}
+  ["votes","spons","cospons","sim"].forEach(function(x){document.getElementById("p-"+x).style.display=x===t?"":"none"});
+  if(t==="sim"&&!simDone)drawSimilar();}
+var simDone=false;
+function drawSimilar(){
+  if(!MX||!ME)return;simDone=true;
+  var rows=Site.similar(MX,ME.id),by={},mine=ME.c[CG];
+  DIR.forEach(function(e){by[e.id]=e});
+  rows=rows.filter(function(r){return by[r.id]&&by[r.id].c[CG]});
+  function pc(x){return x==="D"||x==="R"?x:"I"}
+  var grp={D:[0,0],R:[0,0]};
+  rows.forEach(function(r){var p=by[r.id].c[CG].party;if(grp[p]){grp[p][0]+=r.pct;grp[p][1]++}});
+  var avg=function(p){return grp[p][1]?(grp[p][0]/grp[p][1]).toFixed(1)+"%":"\u2014"};
+  document.getElementById("simh").textContent="Agreement is the share of roll calls, where both members voted Yea or Nay, on which they voted the same way. Pairs need at least half of this member's Yea/Nay votes in common, so members who served only briefly are left out.";
+  document.getElementById("simcards").innerHTML=[["Average agreement with Democrats",avg("D"),"across "+grp.D[1]+" members"],["Average agreement with Republicans",avg("R"),"across "+grp.R[1]+" members"]].map(function(c){return'<div class="card"><div class="k">'+c[0]+'</div><div class="v">'+c[1]+'</div><div class="d">'+c[2]+"</div></div>"}).join("");
+  function li(r){var m=by[r.id],c=m.c[CG];
+    return"<li><a class=\"bn\" href=\""+Site.memberHref(m.id,CG)+"\">"+esc(m.first+" "+m.last)+'</a> <span class="badge '+pc(c.party)+'">'+esc(c.party||"?")+"</span> "+esc(c.state)+(c.chamber==="house"&&c.district?"-"+c.district:"")+
+      ' <span class="bd">'+r.pct.toFixed(1)+"% \u00b7 "+r.same+" of "+r.common+' \u00b7 <a href="relationships.html?chamber='+CH+"&congress="+CG+"&a="+encodeURIComponent(ME.id)+"&b="+encodeURIComponent(m.id)+'">compare</a></span></li>'}
+  rows.sort(function(a,b){return b.pct-a.pct||b.common-a.common});
+  document.getElementById("simtop").innerHTML=rows.slice(0,10).map(li).join("");
+  document.getElementById("simlow").innerHTML=rows.slice(-10).reverse().map(li).join("");
+  document.getElementById("simlink").href="relationships.html?chamber="+CH+"&congress="+CG+"&a="+encodeURIComponent(ME.id);
+}
 document.getElementById("ptabs").addEventListener("click",function(e){if(e.target.dataset.t)showTab(e.target.dataset.t)});
 document.getElementById("vq").oninput=function(){shown=100;drawVotes()};
 document.getElementById("vmore").onclick=function(){shown+=100;drawVotes()};
 
 async function loadCongress(){
   var c=ME.c[CG],s;
-  CH=c.chamber;
+  CH=c.chamber;R=Site.ranks(DIR,CH,CG);
   var title=(CH==="senate"?"Sen. ":"Rep. ")+ME.first+" "+ME.last;
   document.getElementById("h").textContent=title;
   document.title=title;
   var pn={D:"Democratic",R:"Republican",I:"Independent"}[c.party]||c.party||"";
   document.getElementById("sub").innerHTML='<span class="badge '+((c.party==="D"||c.party==="R")?c.party:"I")+'">'+esc(c.party||"?")+"</span> "+esc(pn)+" · "+esc(c.state)+(CH==="house"&&c.district?", District "+c.district:"")+" · "+Site.ordinal(CG)+" Congress "+Site.chamberName(CH);
   document.getElementById("back").href="members.html?chamber="+CH+"&congress="+CG;
-  document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call.";
+  document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call. Maverick score adds, for each such vote, the number of party members who voted with the majority minus the number who voted against.";
   try{
     var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);
     MX=r[0];IDX={};r[1].forEach(function(v){IDX[v.session+"-"+v.roll]=v});
@@ -120,7 +153,7 @@ async function loadCongress(){
   var dir;
   try{dir=await Site.json("data/members/directory.json")}
   catch(e){document.getElementById("sub").textContent="Member data is not available yet ("+e.message+").";return}
-  ME=dir.filter(function(e){return e.id===id})[0];
+  DIR=dir;ME=dir.filter(function(e){return e.id===id})[0];
   if(!ME){document.getElementById("h").textContent="Member not found";return}
   var cgs=Object.keys(ME.c).map(Number).sort(function(a,b){return b-a});
   CG=parseInt(q.get("congress"),10);

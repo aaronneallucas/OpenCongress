@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voting Relationships</title>
+<link rel="stylesheet" href="site.css">
+<style>
+.ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0 4px}
+#mapwrap{position:relative}
+#mapwrap{border:1px solid var(--line);border-radius:8px;background:#fff}
+#mapwrap svg{display:block;width:100%;height:auto;position:relative;z-index:1}
+#ecv{position:absolute;left:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none;border-radius:8px}
+#mtip{position:absolute;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.18);display:none;z-index:5;white-space:nowrap}
+#mtip b{font-size:15px;display:block}
+.dot{cursor:pointer}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0}
+@media (max-width:640px){.pair{grid-template-columns:1fr}}
+.big{font-size:34px;font-weight:800;line-height:1.1}
+.res{margin:10px 0 0}
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<h1>Voting Relationships</h1>
+<p class="sub" id="sub">How alike members voted, using every roll call in the chosen Congress.</p>
+<div class="ctl"><label>Chamber <select id="ch"><option value="house">House</option><option value="senate">Senate</option></select></label>
+  <label>Congress <select id="cg"></select></label></div>
+
+<div class="panel">
+  <h2>Voting map</h2>
+  <div class="ctl"><input id="mq" type="search" placeholder="Find a member on the map" style="flex:1 1 260px;max-width:380px;width:auto"><span class="small" id="mn" style="margin:0"></span></div>
+  <div class="ctl">
+    <label><input type="checkbox" id="econ" checked style="width:auto"> Show connections</label>
+    <label>Minimum agreement <input type="range" id="emin" min="0" max="100" step="1" value="0" style="width:160px;padding:0;vertical-align:middle"> <b id="eval">0%</b></label>
+    <span class="small" id="ecount" style="margin:0"></span>
+  </div>
+  <div id="mapwrap"><canvas id="ecv" width="1800" height="1040"></canvas><div id="map"></div><div id="mtip"></div></div>
+  <div class="legend" id="mleg" style="display:flex;gap:6px 14px;flex-wrap:wrap;margin-top:8px;font-size:13px"></div>
+  <div class="legend" id="eleg" style="display:flex;gap:6px 14px;flex-wrap:wrap;margin-top:4px;font-size:13px"></div>
+  <p class="small" id="mnote"></p>
+</div>
+
+<div class="panel">
+  <h2>Compare two members</h2>
+  <div class="pair">
+    <div><input id="pa" list="dl" placeholder="First member (type a name)" autocomplete="off"></div>
+    <div><input id="pb" list="dl" placeholder="Second member" autocomplete="off"></div>
+  </div>
+  <datalist id="dl"></datalist>
+  <div class="res" id="pres"><span class="small">Pick two members to see how often they voted the same way.</span></div>
+</div>
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CH="house",CG=119,MX=null,IDX={},DIR=[],LIST=[],BYID={},LABELS={},POS={};
+var PCOL={D:Site.HEX.dY,R:Site.HEX.rY,I:Site.HEX.iY},PN={D:"Democratic",R:"Republican",I:"Independent"};
+function pcode(p){return p==="D"||p==="R"?p:"I"}
+
+/* ---- principal components of the vote matrix (Yea=+1, Nay=-1, other = member average) ---- */
+function pca(ids){
+  var V=MX.votes.length,n=ids.length,X=new Array(n),mean=new Float64Array(V),cnt=new Float64Array(V),i,j,it;
+  for(i=0;i<n;i++){X[i]=new Float64Array(V);var s=MX.members[ids[i]];
+    for(j=0;j<V;j++){var v=Site.sgn(s[j]);if(v){X[i][j]=v;mean[j]+=v;cnt[j]++}}}
+  var keep=[];
+  for(j=0;j<V;j++){mean[j]=cnt[j]?mean[j]/cnt[j]:0;if(cnt[j]>=5)keep.push(j)}
+  for(i=0;i<n;i++){var s2=MX.members[ids[i]];
+    for(var k=0;k<keep.length;k++){j=keep[k];X[i][j]=Site.sgn(s2[j])?X[i][j]-mean[j]:0}}
+  var K=keep.length;
+  function mulX(v){var r=new Float64Array(n);for(var a=0;a<n;a++){var row=X[a],t=0;for(var b=0;b<K;b++)t+=row[keep[b]]*v[b];r[a]=t}return r}
+  function mulXt(u){var r=new Float64Array(K);for(var a=0;a<n;a++){var row=X[a],ua=u[a];if(!ua)continue;for(var b=0;b<K;b++)r[b]+=row[keep[b]]*ua}return r}
+  function norm(v){var t=0;for(var a=0;a<v.length;a++)t+=v[a]*v[a];t=Math.sqrt(t)||1;for(a=0;a<v.length;a++)v[a]/=t;return t}
+  var comps=[];
+  for(var c=0;c<2;c++){
+    var v=new Float64Array(K);for(j=0;j<K;j++)v[j]=Math.sin(j*12.9898+c*78.233+1)*0.5+0.5;
+    for(it=0;it<80;it++){
+      comps.forEach(function(p){var d=0;for(var a=0;a<K;a++)d+=v[a]*p[a];for(a=0;a<K;a++)v[a]-=d*p[a]});
+      v=mulXt(mulX(v));norm(v)}
+    comps.push(v)}
+  return comps.map(function(v){return mulX(v)});
+}
+
+function drawMap(){
+  var el=document.getElementById("map");
+  var need=0;LIST.forEach(function(e){need=Math.max(need,Site.castCount(MX.members[e.id]||""))});
+  var ids=LIST.filter(function(e){return Site.castCount(MX.members[e.id]||"")>=0.3*need}).map(function(e){return e.id});
+  var skipped=LIST.length-ids.length;
+  if(ids.length<5){el.innerHTML='<p class="small">Not enough votes saved yet to draw a map.</p>';return}
+  var sc=pca(ids),W=900,H=520,P=30;
+  /* orient: Democrats left, and give the second axis a fixed direction */
+  var sd=0,nd=0,sr=0,nr=0;
+  ids.forEach(function(id,i){var p=pcode(BYID[id].c[CG].party);if(p==="D"){sd+=sc[0][i];nd++}else if(p==="R"){sr+=sc[0][i];nr++}});
+  if(nd&&nr&&sd/nd>sr/nr)for(var i=0;i<ids.length;i++)sc[0][i]=-sc[0][i];
+  var s2=0;for(i=0;i<ids.length;i++)if(sc[0][i]>0)s2+=sc[1][i];
+  if(s2<0)for(i=0;i<ids.length;i++)sc[1][i]=-sc[1][i];
+  var mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9;
+  for(i=0;i<ids.length;i++){mnx=Math.min(mnx,sc[0][i]);mxx=Math.max(mxx,sc[0][i]);mny=Math.min(mny,sc[1][i]);mxy=Math.max(mxy,sc[1][i])}
+  var rx=(mxx-mnx)||1,ry=(mxy-mny)||1;POS={};
+  var g="",party={D:[],R:[],I:[]};
+  ids.forEach(function(id,i){
+    var x=P+(sc[0][i]-mnx)/rx*(W-2*P),y=H-P-(sc[1][i]-mny)/ry*(H-2*P);
+    POS[id]=[x,y];party[pcode(BYID[id].c[CG].party)].push(id)});
+  var dots="";
+  ["D","I","R"].forEach(function(p){party[p].forEach(function(id){
+    dots+='<circle class="dot" data-id="'+esc(id)+'" cx="'+POS[id][0].toFixed(1)+'" cy="'+POS[id][1].toFixed(1)+'" r="'+(CH==="senate"?6:4.5)+'" fill="'+PCOL[p]+'" fill-opacity="1" stroke="#fff" stroke-width="1.2"/>'})});
+  g+='<g id="hov"></g>'+dots;
+  g+='<text x="'+P+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66">← votes more with the Democratic majority</text>'+
+     '<text x="'+(W-P)+'" y="'+(H-6)+'" font-size="12" fill="#6b6b66" text-anchor="end">votes more with the Republican majority →</text>';
+  el.innerHTML='<svg viewBox="0 0 '+W+" "+H+'" role="img" aria-label="Voting map of members">'+g+'</svg>';
+  document.getElementById("mleg").innerHTML=["D","R","I"].filter(function(p){return party[p].length}).map(function(p){
+    return'<span><i class="sw" style="background:'+PCOL[p]+'"></i>'+PN[p]+" ("+party[p].length+")</span>"}).join("");
+  document.getElementById("mnote").textContent="Each dot is a member. Dots that are closer together voted more alike on roll calls in the "+Site.ordinal(CG)+" Congress. Positions come only from the votes (the two strongest patterns in how members voted), so the axes have no units. The horizontal axis mostly separates the parties; the vertical axis shows the next biggest pattern." + (skipped?" "+skipped+" member(s) who cast too few Yea/Nay votes are left off.":"");
+  var svg=el.querySelector("svg"),tip=document.getElementById("mtip"),wrap=document.getElementById("mapwrap");
+  svg.addEventListener("mousemove",function(e){
+    var d=e.target.closest&&e.target.closest(".dot");
+    if(!d){tip.style.display="none";return}
+    var m=BYID[d.dataset.id],c=m.c[CG],r=wrap.getBoundingClientRect();
+    tip.innerHTML="<b>"+esc(m.first+" "+m.last)+"</b>"+esc((PN[pcode(c.party)]||c.party)+" · "+c.state+(CH==="house"&&c.district?"-"+c.district:""));
+    tip.style.display="block";
+    var l=e.clientX-r.left+14;if(l+tip.offsetWidth>r.width)l=e.clientX-r.left-tip.offsetWidth-14;
+    tip.style.left=Math.max(0,l)+"px";tip.style.top=Math.max(0,e.clientY-r.top-10)+"px"});
+  svg.addEventListener("mouseleave",function(){tip.style.display="none"});
+  svg.addEventListener("click",function(e){var d=e.target.closest&&e.target.closest(".dot");if(d)location.href=Site.memberHref(d.dataset.id,CG)});
+  MAPIDS=ids;computeEdges();drawEdges();
+  svg.addEventListener("mouseover",function(e){var d=e.target.closest&&e.target.closest(".dot");showHover(d?d.dataset.id:null)});
+  svg.addEventListener("mouseleave",function(){showHover(null)});
+  highlight();
+}
+
+/* ---- connections: line thickness shows how often two members voted the same way ---- */
+var MAPIDS=[],EDGES=[],ECOL={DD:["#1f4e9c","Democrat to Democrat"],RR:["#b21f1f","Republican to Republican"],DR:["#8a8a8a","Democrat to Republican"],I:["#5b2a86","Independent to anyone"]};
+function eclass(a,b){var x=pcode(BYID[a].c[CG].party),y=pcode(BYID[b].c[CG].party);
+  if(x==="I"||y==="I")return"I";if(x==="D"&&y==="D")return"DD";if(x==="R"&&y==="R")return"RR";return"DR"}
+function computeEdges(){
+  var ids=MAPIDS,n=ids.length,V=MX.votes.length,S=[],cast=[],i,j,k;
+  for(i=0;i<n;i++){var str=MX.members[ids[i]],a=new Int8Array(V),c=0;for(k=0;k<V;k++){a[k]=Site.sgn(str[k]);if(a[k])c++}S.push(a);cast.push(c)}
+  EDGES=[];
+  for(i=0;i<n;i++)for(j=i+1;j<n;j++){
+    var A=S[i],B=S[j],same=0,com=0;
+    for(k=0;k<V;k++){var x=A[k],y=B[k];if(x&&y){com++;if(x===y)same++}}
+    if(com>=Math.max(10,0.5*Math.min(cast[i],cast[j]))){EDGES.push([ids[i],ids[j],100*same/com,com])}}
+  EDGES.sort(function(a,b){return a[2]-b[2]||a[3]-b[3]});
+}
+function line(a,b,w,op,col){
+  var p=POS[a],q=POS[b];
+  return'<line x1="'+p[0].toFixed(1)+'" y1="'+p[1].toFixed(1)+'" x2="'+q[0].toFixed(1)+'" y2="'+q[1].toFixed(1)+'" stroke="'+col+'" stroke-width="'+w.toFixed(2)+'" stroke-opacity="'+op+'" stroke-linecap="round"/>'}
+function drawEdges(){
+  var cv=document.getElementById("ecv"),ctx=cv.getContext("2d"),on=document.getElementById("econ").checked,thr=parseInt(document.getElementById("emin").value,10);
+  document.getElementById("eval").textContent=thr+"%"+(thr===0?" (all connections)":"");
+  var leg=document.getElementById("eleg"),sx=cv.width/900,sy=cv.height/520;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(!on||!EDGES.length){document.getElementById("ecount").textContent="";leg.innerHTML="";return}
+  var per={DD:0,RR:0,DR:0,I:0},shown=0;
+  ctx.lineCap="round";
+  EDGES.forEach(function(e){            /* weakest first, so the strongest lines end up on top */
+    if(e[2]<thr)return;
+    var c=eclass(e[0],e[1]),p=e[2]/100,q=p*p*p,a=POS[e[0]],b=POS[e[1]];
+    per[c]++;shown++;
+    ctx.strokeStyle=ECOL[c][0];ctx.globalAlpha=0.006+0.2*q;ctx.lineWidth=(0.1+0.7*q)*2;
+    ctx.beginPath();ctx.moveTo(a[0]*sx,a[1]*sy);ctx.lineTo(b[0]*sx,b[1]*sy);ctx.stroke()});
+  ctx.globalAlpha=1;
+  document.getElementById("ecount").textContent=shown.toLocaleString()+" connection"+(shown===1?"":"s");
+  leg.innerHTML=Object.keys(ECOL).filter(function(c){return per[c]||c!=="I"}).map(function(c){return'<span><i class="sw" style="background:'+ECOL[c][0]+';height:3px;margin-top:4px"></i>'+ECOL[c][1]+" ("+per[c].toLocaleString()+")</span>"}).join("")+
+    '<span style="color:var(--muted)">Thicker, darker line = voted alike more often; weak ties are very faint</span>';
+}
+function showHover(id){
+  var h=document.querySelector("#hov");if(!h)return;
+  if(!id||!document.getElementById("econ").checked){h.innerHTML="";return}
+  var mine=EDGES.filter(function(e){return e[0]===id||e[1]===id}),cls={};
+  var pick=[];
+  mine.forEach(function(e){var o=e[0]===id?e[1]:e[0],c=eclass(id,o);cls[c]=(cls[c]||0)+1;
+    if(cls[c]<=(c==="DD"||c==="RR"?20:8))pick.push([e,c])});
+  h.innerHTML=pick.map(function(x){var e=x[0],w=0.7+1.3*Math.pow(e[2]/100,3);return line(e[0],e[1],w,.9,ECOL[x[1]][0])}).join("");
+}
+function highlight(){
+  var q=document.getElementById("mq").value.toLowerCase().split(/\s+/).filter(Boolean),svg=document.querySelector("#map svg");
+  var old=svg&&svg.querySelector("#ring");if(old)old.remove();
+  var hits=[];
+  if(q.length)LIST.forEach(function(e){
+    if(!POS[e.id])return;var c=e.c[CG],hay=(e.first+" "+e.last+" "+c.state).toLowerCase();
+    if(q.every(function(t){return hay.indexOf(t)>-1}))hits.push(e)});
+  document.getElementById("mn").textContent=q.length?(hits.length===1?"1 match (circled in gold)":hits.length+" matches"):"";
+  if(svg)svg.querySelectorAll(".dot").forEach(function(d){
+    var on=!q.length||hits.some(function(h){return h.id===d.dataset.id});
+    d.setAttribute("fill-opacity",on?"1":".12")});
+  if(svg&&hits.length===1){var p=POS[hits[0].id];
+    svg.insertAdjacentHTML("beforeend",'<circle id="ring" cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="11" fill="none" stroke="#f2b300" stroke-width="3" pointer-events="none"/>')}
+}
+
+/* ---- compare two members ---- */
+function pick(v){return LABELS[v.trim()]||null}
+function comparePair(){
+  var a=pick(document.getElementById("pa").value),b=pick(document.getElementById("pb").value),out=document.getElementById("pres");
+  if(!a||!b){out.innerHTML='<span class="small">Pick two members from the suggestions to see how often they voted the same way.</span>';return}
+  if(a===b){out.innerHTML='<span class="small">Choose two different members.</span>';return}
+  var A=BYID[a],B=BYID[b],r=Site.agree(MX.members[a],MX.members[b]);
+  if(!r.common){out.innerHTML='<span class="small">These two members have no Yea/Nay roll calls in common in this Congress.</span>';return}
+  var diffs=[];
+  MX.votes.forEach(function(sr,i){var x=Site.sgn(MX.members[a][i]),y=Site.sgn(MX.members[b][i]);
+    if(x&&y&&x!==y){var v=IDX[sr[0]+"-"+sr[1]];if(v)diffs.push({v:v,x:x})}});
+  diffs.sort(function(p,q){return(q.v.date||"")<(p.v.date||"")?-1:(q.v.date||"")>(p.v.date||"")?1:(q.v.roll-p.v.roll)});
+  var nm=function(m){return'<a href="'+Site.memberHref(m.id,CG)+'">'+esc(m.first+" "+m.last)+"</a>"};
+  out.innerHTML='<div class="big">'+r.pct.toFixed(1)+'%</div><p style="margin:2px 0 10px">'+nm(A)+" and "+nm(B)+" voted the same way on "+r.same+" of "+r.common+
+    " roll calls where both voted Yea or Nay. They voted differently on "+(r.common-r.same)+".</p>"+
+    (diffs.length?'<div class="tblwrap"><table class="tbl"><thead><tr><th>Date</th><th>Vote</th><th>Description</th><th>'+esc(A.last)+"</th><th>"+esc(B.last)+"</th></tr></thead><tbody>"+
+      diffs.slice(0,50).map(function(d){var v=d.v;
+        return"<tr><td>"+esc(Site.fmtDate(v.date))+'</td><td><a href="'+Site.voteHref(CH,CG,v.session,v.roll)+'">Roll '+v.roll+"</a></td><td>"+(v.bill?"<b>"+esc(v.bill)+"</b> · ":"")+esc(v.question||"")+
+          '</td><td class="'+(d.x>0?"cy":"cn")+'"><b>'+(d.x>0?"YES":"NO")+'</b></td><td class="'+(d.x>0?"cn":"cy")+'"><b>'+(d.x>0?"NO":"YES")+"</b></td></tr>"}).join("")+
+      "</tbody></table></div>"+(diffs.length>50?'<p class="small">Showing the 50 most recent of '+diffs.length+" disagreements.</p>":""):"");
+}
+document.getElementById("pa").oninput=comparePair;document.getElementById("pb").oninput=comparePair;
+document.getElementById("mq").oninput=highlight;
+document.getElementById("econ").onchange=drawEdges;
+document.getElementById("emin").oninput=drawEdges;
+
+async function load(){
+  document.getElementById("pres").innerHTML='<span class="small">Loading…</span>';
+  document.getElementById("map").innerHTML='<p class="small">Loading…</p>';
+  try{
+    var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);
+    MX=r[0];IDX={};r[1].forEach(function(v){IDX[v.session+"-"+v.roll]=v});
+  }catch(e){document.getElementById("map").innerHTML='<p class="small">Voting data is not available yet ('+esc(e.message)+").</p>";return}
+  LIST=DIR.filter(function(e){var s=e.c&&e.c[CG];return s&&s.chamber===CH&&MX.members[e.id]});
+  LIST.sort(function(a,b){return(a.last+a.first)<(b.last+b.first)?-1:1});
+  BYID={};LABELS={};
+  var opts="";
+  LIST.forEach(function(e){BYID[e.id]=e;var c=e.c[CG],lab=e.last+", "+e.first+" ("+pcode(c.party)+"-"+c.state+(CH==="house"&&c.district?"-"+c.district:"")+")";
+    LABELS[lab]=e.id;opts+='<option value="'+esc(lab)+'">'});
+  document.getElementById("dl").innerHTML=opts;
+  var q=Site.qs();
+  [["a","pa"],["b","pb"]].forEach(function(x){var id=q.get(x[0]);
+    document.getElementById(x[1]).value="";
+    if(id&&BYID[id]){Object.keys(LABELS).forEach(function(l){if(LABELS[l]===id)document.getElementById(x[1]).value=l})}});
+  drawMap();comparePair();
+}
+function setUrl(){history.replaceState(null,"","?chamber="+CH+"&congress="+CG)}
+(async function(){
+  Site.nav("relationships");
+  var q=Site.qs(),info=await Site.congresses();
+  CH=q.get("chamber")==="senate"?"senate":"house";
+  CG=parseInt(q.get("congress"),10)||(info?info.latest:119);
+  var list=info?info.congresses:[{congress:119,years:"2025–2027",chambers:["house","senate"]}];
+  document.getElementById("ch").value=CH;
+  document.getElementById("cg").innerHTML=list.map(function(x){return'<option value="'+x.congress+'">'+Site.ordinal(x.congress)+" ("+x.years+")</option>"}).join("");
+  document.getElementById("cg").value=CG;
+  document.getElementById("ch").onchange=function(){CH=this.value;setUrl();load()};
+  document.getElementById("cg").onchange=function(){CG=parseInt(this.value,10);setUrl();load()};
+  try{DIR=await Site.json("data/members/directory.json")}
+  catch(e){document.getElementById("map").innerHTML='<p class="small">Member data is not available yet ('+esc(e.message)+").</p>";return}
+  load();
+})();
+</script>
+</body>
+</html>
