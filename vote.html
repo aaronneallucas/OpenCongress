@@ -50,7 +50,8 @@ button.on{background:var(--fg);color:var(--bg)}
 </head>
 <body>
 <h1>House Vote Map</h1>
-<p class="sub" id="bill">H.R. 1234 — Sample Act (sample data)</p>
+<p class="sub" id="bill"></p>
+<p class="small" id="links"></p>
 
 <div class="nav"><a href="index.html">&larr; All votes</a><a id="newer" style="display:none">&larr; Newer vote</a><a id="older" style="display:none">Older vote &rarr;</a><span class="small" id="stat"></span></div>
 <div class="totals"><span class="y" id="ty"></span><span class="n" id="tn"></span></div>
@@ -226,6 +227,21 @@ var INDEX=[];
 function stat(t){document.getElementById("stat").textContent=t}
 function fmtDate(d){if(!d)return"";var t=new Date(d);return isNaN(t)?d:t.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
 function vkey(v){return v.congress+"-"+v.session+"-"+v.roll}
+var BT={HR:"house-bill",S:"senate-bill",HRES:"house-resolution",SRES:"senate-resolution",HJRES:"house-joint-resolution",SJRES:"senate-joint-resolution",HCONRES:"house-concurrent-resolution",SCONRES:"senate-concurrent-resolution"};
+function billLink(j){
+  if(j.billUrl&&/^https:\/\//.test(j.billUrl))return j.billUrl;
+  var m=(j.bill||"").match(/^([A-Za-z]+)\s+(\d+)$/),t=m&&BT[m[1].toUpperCase()];
+  return t?"https://www.congress.gov/bill/"+j.congress+"/"+t+"/"+m[2]:null;}
+function showLinks(j){
+  var el=document.getElementById("links");el.textContent="";
+  function add(text,href){var a=document.createElement("a");a.textContent=text;a.href=href;a.target="_blank";a.rel="noopener";
+    if(el.firstChild)el.appendChild(document.createTextNode(" \u00b7 "));el.appendChild(a)}
+  var b=billLink(j);
+  if(b)add("View "+(j.bill||"bill")+" on Congress.gov",b);
+  if(j.amendment){var am=j.amendment.match(/^([A-Za-z]+)\s+(\d+)$/);
+    if(am){var side=am[1].toUpperCase().indexOf("S")===0?"senate-amendment":"house-amendment";
+      add("View amendment "+j.amendment,"https://www.congress.gov/amendment/"+j.congress+"th-congress/"+side+"/"+am[2])}}
+}
 async function openVote(v){
   try{
     stat("Loading\u2026");
@@ -235,7 +251,7 @@ async function openVote(v){
       res.push({bioguideID:m.id,firstName:m.first,lastName:m.last,voteParty:m.party,voteState:m.state,voteCast:m.vote});
       if(m.district!=null)dmap[m.id]=did(m.state,m.district)});
     roll={houseRollCallVoteMemberVotes:{legislationType:j.bill||"",legislationNumber:"",voteQuestion:j.question||"",result:j.result||"",rollCallNumber:j.roll,startDate:j.date,results:res}};
-    conv();stat("");
+    conv();showLinks(j);stat("");
     document.title="Roll Call "+j.roll+" \u2014 House Vote Map";
   }catch(e){stat("Could not load that vote ("+e.message+")")}}
 function go(){

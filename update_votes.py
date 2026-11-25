@@ -150,7 +150,9 @@ def main():
                     "date": R.get("startDate") or v.get("startDate"),
                     "question": R.get("voteQuestion") or v.get("voteQuestion"),
                     "result": R.get("result") or v.get("result"),
-                    "bill": bill, "billUrl": R.get("legislationUrl")}
+                    "bill": bill, "billUrl": R.get("legislationUrl"),
+                    "amendment": ((R.get("amendmentType") or "") + " " + str(R.get("amendmentNumber") or "")).strip(),
+                    "amendmentAuthor": R.get("amendmentAuthor")}
             fname = "votes/%d-%d-%d.json" % (cg, int(ss), roll)
             save_json(os.path.join(out_dir, fname), dict(meta, members=rows))
             index.append(dict(meta, yes=yes, no=no, file="data/" + fname if out_dir == "data" else fname))
