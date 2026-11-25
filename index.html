@@ -3,104 +3,146 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Roll Call Votes</title>
+<title>Open Congress</title>
 <link rel="stylesheet" href="site.css">
+<style>
+.home{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+@media (max-width:760px){.home{grid-template-columns:1fr}}
+.hc{border:1px solid var(--line);border-radius:10px;padding:16px 18px;background:#fff}
+.hc h2{margin:0 0 2px;font-size:15px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.hc .vt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 2px;font-size:20px;font-weight:700}
+.hc .vt a{color:inherit;text-decoration:none}.hc .vt a:hover{text-decoration:underline}
+.hc .m{color:var(--muted);font-size:14px;margin:0 0 14px}
+.hc .x{color:var(--muted);font-size:13px;margin-top:8px}
+.hc .all{display:inline-block;margin-top:14px;font-size:14px}
+.finder{position:relative}
+.finder input{font-size:16px;padding:10px 12px}
+#hits{position:absolute;left:0;right:0;top:100%;z-index:10;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.14);margin-top:4px;display:none;max-height:340px;overflow-y:auto}
+#hits a{display:flex;gap:10px;align-items:center;padding:8px 12px;text-decoration:none;border-bottom:1px solid var(--line)}
+#hits a:last-child{border-bottom:0}#hits a:hover,#hits a.sel{background:#f1f1ee}
+#hits small{margin-left:auto;color:var(--muted)}
+</style>
 </head>
 <body>
 <div id="nav"></div>
-<h1 id="h">Roll Call Votes</h1>
-<p class="sub" id="sub"></p>
-<input id="find" type="search" placeholder="Search by bill, topic, or roll number" style="margin-bottom:14px">
-<div id="list"></div>
-<button id="more">Show more</button>
-<p class="foot" id="msg"></p>
+<h1>Open Congress</h1>
+<p class="sub" id="sub">The most recent roll call vote in each chamber.</p>
+<div class="home" id="home"></div>
+<div class="panel">
+  <h2>Find a member</h2>
+  <div class="finder"><input id="mq" type="search" placeholder="Search representatives and senators by name or state" autocomplete="off" aria-label="Find a member"><div id="hits"></div></div>
+  <p class="small" style="margin-bottom:0">See their votes, missed votes, how often they break from their party, and the bills they sponsor.
+    <a href="members.html">All representatives</a> &middot; <a href="members.html?chamber=senate">All senators</a></p>
+</div>
+<div class="panel">
+  <h2>Roll call votes this Congress vs. previous Congresses</h2>
+  <div class="two">
+    <div><b>House</b><div class="chart" id="ch-house"></div><div class="lg" id="lg-house"></div></div>
+    <div><b>Senate</b><div class="chart" id="ch-senate"></div><div class="lg" id="lg-senate"></div></div>
+  </div>
+  <a class="all" href="compare.html" style="display:inline-block;margin-top:12px;font-size:14px">Compare Congresses &rarr;</a>
+</div>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var IDX = [], shown = 40, CH = "house", CG = 119, busy = {};
-var HEX = Site.HEX, esc = Site.esc;
+var esc = Site.esc;
 
-function vk(v) { return v.session + "-" + v.roll; }
-function bar(v) {
-  var segs;
-  if ("dY" in v) segs = ["dY", "rY", "iY", "dN", "rN", "iN"].map(function (k) { return [v[k], HEX[k]]; });
-  else segs = [[v.yes, "#1e8e4e"], [v.no, "#c62828"]];
-  var t = 0;
-  segs.forEach(function (s) { t += s[0] || 0; });
-  return '<div class="b">' + segs.map(function (s) {
-    return s[0] ? '<i style="width:' + (s[0] / t * 100) + '%;background:' + s[1] + '"></i>' : "";
-  }).join("") + "</div>";
-}
-function tally(rows) {
-  var t = {dY: 0, dN: 0, rY: 0, rN: 0, iY: 0, iN: 0, present: 0, notVoting: 0};
-  rows.forEach(function (m) {
-    var x = String(m.vote || "").toLowerCase(), p = String(m.party || "").toUpperCase();
-    p = (p === "D" || p === "R") ? p.toLowerCase() : "i";
-    if (x === "yea" || x === "aye" || x === "yes" || x === "guilty") t[p + "Y"]++;
-    else if (x === "nay" || x === "no" || x === "not guilty") t[p + "N"]++;
-    else if (x === "present") t.present++;
-    else if (x === "not voting") t.notVoting++;
-  });
-  return t;
-}
-async function enrich(v) {
-  /* votes saved before party counts existed: work them out from the vote's own file */
-  if ("dY" in v || busy[vk(v)] || !v.file) return;
-  busy[vk(v)] = 1;
-  try {
-    var r = await fetch(v.file);
-    if (!r.ok) return;
-    var j = await r.json();
-    Object.assign(v, tally(j.members));
-    var row = document.querySelector('.row[data-k="' + vk(v) + '"]');
-    if (row) {
-      row.querySelector(".bs").innerHTML = bar(v);
-      row.querySelector(".x").textContent = "Present " + v.present + " · Not voting " + v.notVoting;
-    }
-  } catch (e) {}
-}
-function draw() {
-  var q = document.getElementById("find").value.toLowerCase();
-  var f = IDX.filter(function (v) {
-    return !q || [v.bill, v.question, v.title, v.result, "roll " + v.roll, v.roll, Site.fmtDate(v.date)].join(" ").toLowerCase().indexOf(q) > -1;
-  });
-  document.getElementById("list").innerHTML = f.slice(0, shown).map(function (v) {
-    var other = ("present" in v) ? "Present " + v.present + " · Not voting " + v.notVoting : "";
-    return '<a class="row" data-k="' + vk(v) + '" href="' + Site.voteHref(CH, CG, v.session, v.roll) + '">' +
-      '<div class="t">' + (v.bill ? "<b>" + esc(v.bill) + "</b> · " : "") + esc(v.question || "Roll call") + "</div>" +
-      (v.title && v.title !== v.question ? '<div class="tt">' + esc(v.title) + "</div>" : "") +
-      '<div class="m">Roll ' + v.roll + " · " + esc(Site.fmtDate(v.date)) + (v.result ? " · " + esc(v.result) : "") + "</div>" +
-      '<div class="bw"><span class="bs">' + bar(v) + '</span><div class="c"><span class="y">YES ' + v.yes + '</span><span class="n">NO ' + v.no + "</span></div></div>" +
-      '<div class="x">' + other + "</div></a>";
-  }).join("");
-  document.getElementById("more").style.display = f.length > shown ? "block" : "none";
-  document.getElementById("msg").textContent = f.length ? "" : (IDX.length ? "No votes match your search." : "");
-  f.slice(0, shown).forEach(function (v, i) { setTimeout(function () { enrich(v); }, i * 60); });
-}
-document.getElementById("find").oninput = function () { shown = 40; draw(); };
-document.getElementById("more").onclick = function () { shown += 40; draw(); };
-
-(async function () {
-  Site.nav("votes");
-  var q = Site.qs(), info = await Site.congresses();
-  CH = q.get("chamber") === "senate" ? "senate" : "house";
-  CG = parseInt(q.get("congress"), 10) || (info ? info.latest : 119);
-  var title = Site.chamberName(CH) + " Roll Call Votes";
-  document.getElementById("h").textContent = title;
-  document.getElementById("sub").textContent = Site.ordinal(CG) + " Congress (" + (info ? ((info.congresses.filter(function (x) { return x.congress === CG; })[0] || {}).years || "") : "") + "). Newest first. Select a vote to see how each " + (CH === "senate" ? "senator" : "district") + " voted.";
-  document.title = title + " — " + Site.ordinal(CG) + " Congress";
-  try {
-    IDX = await Site.json("data/" + CH + "/" + CG + "/index.json");
-  } catch (e) {
-    document.getElementById("msg").textContent = "No saved votes found yet for the " + Site.ordinal(CG) + " Congress " + Site.chamberName(CH) + " (" + e.message + ").";
-    return;
-  }
-  IDX.sort(function (a, b) {
+function newest(list) {
+  return list.slice().sort(function (a, b) {
     return (b.date || "") < (a.date || "") ? -1 : (b.date || "") > (a.date || "") ? 1 : (b.session - a.session) || (b.roll - a.roll);
-  });
-  if (!IDX.length) document.getElementById("msg").textContent = "No saved votes yet.";
-  draw();
+  })[0];
+}
+async function card(ch, cg) {
+  var name = Site.chamberName(ch), html = '<div class="hc"><h2>Latest ' + name + " vote</h2>";
+  try {
+    var idx = await Site.json("data/" + ch + "/" + cg + "/index.json"), v = newest(idx);
+    if (!v) throw new Error("none");
+    var rp = Site.resultPill(v.result);
+    if (!("dY" in v) && v.file) {
+      /* older saved votes without party counts: work them out from the vote's own file */
+      try {
+        var j = await Site.json(v.file), t = {dY: 0, dN: 0, rY: 0, rN: 0, iY: 0, iN: 0, present: 0, notVoting: 0};
+        j.members.forEach(function (m) {
+          var x = String(m.vote || "").toLowerCase(), p = String(m.party || "").toUpperCase();
+          p = p === "D" ? "d" : p === "R" ? "r" : "i";
+          if (/^(yea|aye|yes|guilty)$/.test(x)) t[p + "Y"]++;
+          else if (/^(nay|no|not guilty)$/.test(x)) t[p + "N"]++;
+          else if (x === "present") t.present++;
+          else if (x === "not voting") t.notVoting++;
+        });
+        Object.assign(v, t);
+      } catch (e) {}
+    }
+    var sub = [Site.ordinal(cg) + " Congress", v.question, Site.fmtDate(v.date)];
+    if (rp && !rp.known) sub.push(v.result);
+    html += '<div class="vt"><a href="' + Site.voteHref(ch, cg, v.session, v.roll) + '">' + esc(Site.voteTitle(v)) + "</a>" +
+      (rp && rp.known ? '<span class="pill ' + rp.c + '">' + rp.text.charAt(0) + rp.text.slice(1).toLowerCase() + "</span>" : "") + "</div>" +
+      '<p class="m">' + sub.filter(Boolean).map(esc).join(" · ") + "</p>" +
+      Site.tallyHTML(v) +
+      ("present" in v ? '<div class="x">Present ' + v.present + " · Not voting " + v.notVoting + "</div>" : "") +
+      (v.title && v.title !== v.question ? '<div class="x">' + esc(v.title) + "</div>" : "");
+  } catch (e) {
+    html += '<p class="m">No ' + name + " votes have been saved yet.</p>";
+  }
+  return html + '<a class="all" href="votes.html?chamber=' + ch + "&congress=" + cg + '">See all ' + name + " votes →</a></div>";
+}
+(async function () {
+  Site.nav("home");
+  var info = await Site.congresses(), cg = info ? info.latest : 119;
+  document.getElementById("sub").textContent = "The most recent roll call vote in each chamber · " + Site.ordinal(cg) + " Congress.";
+  var parts = await Promise.all([card("house", cg), card("senate", cg)]);
+  document.getElementById("home").innerHTML = parts.join("");
+  finder(cg);
+  for (var ch of ["house", "senate"]) {
+    var ser = await Site.chamberSeries(ch, info, cg);
+    Site.lineChart(document.getElementById("ch-" + ch), ser, {w: 440, h: 240, label: Site.chamberName(ch) + " roll call votes by Congress"});
+    document.getElementById("lg-" + ch).innerHTML = ser.map(function (s) {
+      return '<span><i style="background:' + s.color + '"></i>' + s.label + " (" + s.c.total + ")</span>";
+    }).join("");
+  }
 })();
+
+/* member finder: loads the member directory on first use */
+var DIR = null;
+function finder(cg) {
+  var q = document.getElementById("mq"), hits = document.getElementById("hits"), sel = -1;
+  async function ensure() {
+    if (DIR) return;
+    try { DIR = await Site.json("data/members/directory.json"); } catch (e) { DIR = []; }
+  }
+  function render() {
+    var t = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!t.length || !DIR) { hits.style.display = "none"; return; }
+    var rows = DIR.filter(function (e) {
+      var s = e.c && e.c[cg];
+      if (!s || !(s.eligible > 0)) return false;
+      var hay = (e.first + " " + e.last + " " + s.state + " " + (s.chamber === "senate" ? "senator" : "representative rep")).toLowerCase();
+      return t.every(function (x) { return hay.indexOf(x) > -1; });
+    }).slice(0, 12);
+    sel = -1;
+    hits.innerHTML = rows.map(function (e) {
+      var s = e.c[cg], p = (s.party === "D" || s.party === "R") ? s.party : "I";
+      return '<a href="' + Site.memberHref(e.id, cg) + '"><span class="badge ' + p + '">' + esc(s.party || "?") + "</span><span>" +
+        esc((s.chamber === "senate" ? "Sen. " : "Rep. ") + e.first + " " + e.last) + "</span><small>" + esc(s.state) +
+        (s.chamber === "house" && s.district ? "-" + s.district : "") + "</small></a>";
+    }).join("") || '<div style="padding:10px 12px;color:var(--muted)">No match</div>';
+    hits.style.display = "block";
+  }
+  q.addEventListener("input", async function () { await ensure(); render(); });
+  q.addEventListener("focus", async function () { await ensure(); render(); });
+  q.addEventListener("keydown", function (e) {
+    var a = hits.querySelectorAll("a");
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + a.length) % (a.length || 1);
+      a.forEach(function (x, i) { x.classList.toggle("sel", i === sel); });
+    } else if (e.key === "Enter") {
+      var go = a[sel >= 0 ? sel : 0];
+      if (go) location.href = go.href;
+    } else if (e.key === "Escape") hits.style.display = "none";
+  });
+  document.addEventListener("click", function (e) { if (!e.target.closest(".finder")) hits.style.display = "none"; });
+}
 </script>
 </body>
 </html>

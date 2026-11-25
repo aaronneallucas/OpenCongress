@@ -83,7 +83,7 @@
       return '<div class="tab dd' + (active === name ? " on" : "") + '"><button type="button" aria-haspopup="true" aria-expanded="false">' +
         text + " ▾</button>" + menu(page, label) + "</div>";
     }
-    host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Congress Votes</a>' +
+    host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Open Congress</a>' +
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
       '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div></nav>';

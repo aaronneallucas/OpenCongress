@@ -8,10 +8,7 @@
 <style>
 :root{--b:11px}
 .nav2{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin:10px 0}
-.tally{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-#bar{display:flex;height:16px;width:320px;max-width:100%;border-radius:4px;overflow:hidden;border:1px solid var(--line);position:relative;background:#f1f1ee}
-#bar div{height:100%}
-#mid{position:absolute;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px)}
+h1 .pill{font-size:15px;vertical-align:middle;margin-left:8px}
 .dl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0}
 .legend{display:flex;gap:6px 14px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}
 .legend span{display:inline-flex;align-items:center;gap:5px}
@@ -24,10 +21,11 @@
 .d{width:var(--b);height:var(--b);border-radius:2px;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(128,128,128,.4)}
 .d:hover,.d:focus{outline:2px solid var(--fg);outline-offset:1px}
 .d.hit{outline:3px solid #f2b300;outline-offset:1px;position:relative;z-index:1}
-#tip{position:fixed;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:13px;display:none;z-index:20;min-width:170px}
-#tip b{display:block;font-size:14px;margin-bottom:2px}
-#tip .row{display:flex;justify-content:space-between;gap:12px}
+#tip{position:fixed;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:14px;display:none;z-index:20;min-width:200px}
+#tip .nm{font-size:19px;font-weight:700;line-height:1.2;padding-bottom:7px}
+#tip .pr{display:flex;justify-content:space-between;gap:16px;padding:5px 0;border-top:1px solid #d9d9d9}
 #tip .k{color:var(--muted)}
+#tip .vy{color:var(--yes);font-weight:700}#tip .vn{color:var(--no);font-weight:700}
 .searchrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}
 #q{flex:1 1 280px;max-width:420px;width:auto}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px;align-items:center}
@@ -44,13 +42,13 @@
 </head>
 <body>
 <div id="nav"></div>
-<h1 id="h1">Vote Map</h1>
+<h1 id="h1"><span id="ht">Vote Map</span><span class="pill" id="tr" style="display:none"></span></h1>
 <p class="sub" id="bill"></p>
 <p class="small" id="ttl" style="margin:0 0 4px"></p>
 <p class="small" id="links"></p>
 
-<div class="nav2"><a id="back" href="index.html">&larr; All votes</a><a id="newer" style="display:none">&larr; Newer vote</a><a id="older" style="display:none">Older vote &rarr;</a><span class="small" id="stat"></span></div>
-<div class="tally"><span class="pill" id="tr" style="display:none"></span><span class="pill y" id="ty"></span><div id="bar"><span id="mid"></span></div><span class="pill n" id="tn"></span></div>
+<div class="nav2"><a id="back" href="votes.html">&larr; All votes</a><a id="newer" style="display:none">&larr; Newer vote</a><a id="older" style="display:none">Older vote &rarr;</a><span class="small" id="stat"></span></div>
+<div id="tally"></div>
 <div class="small" id="other"></div>
 <p class="small" id="warn"></p>
 
@@ -142,19 +140,9 @@ function build(){
   render();}
 
 function render(){
-  var c=counts(),bar=document.getElementById("bar"),mid=document.getElementById("mid");
+  var c=counts();
   document.querySelectorAll(".d").forEach(function(d){d.style.background=color(data[d.dataset.id])});
-  var segs=["dY","rY","iY","dN","rN","iN"],tot=c.yes+c.no;
-  bar.querySelectorAll("div").forEach(function(e){e.remove()});
-  segs.forEach(function(s){
-    var n=c[s];if(!n)return;
-    var e=document.createElement("div");
-    e.style.width=(n/tot*100)+"%";e.style.background=HEX[s];
-    e.title=PN[s.charAt(0).toUpperCase()]+" "+(s.charAt(1)==="Y"?"YES":"NO")+": "+n;
-    bar.insertBefore(e,mid);});
-  mid.style.left=(tot?c.yes/tot*100:50)+"%";
-  document.getElementById("ty").textContent="YES "+c.yes;
-  document.getElementById("tn").textContent="NO "+c.no;
+  document.getElementById("tally").innerHTML=Site.tallyHTML(c);
   document.getElementById("other").textContent="Present: "+c.P+"  ·  Not voting: "+c.NV+"  ·  Vacant: "+c.VAC;
   document.getElementById("legend").innerHTML=legendItems(c).map(function(l){return'<span><i class="sw" style="background:'+l[0]+'"></i>'+l[1]+'</span>'}).join("");
   lists();}
@@ -189,11 +177,12 @@ function lists(){
 
 var tip=document.getElementById("tip");
 function show(d){
-  var id=d.dataset.id,x=data[id],k=key(x),h="<b>"+(k==="VAC"||!x?"Vacant":esc(x.rep))+"</b>"+'<div class="row"><span class="k">'+(CH==="senate"?"State":"District")+'</span><span>'+where(id,x)+'</span></div>';
-  if(!(k==="VAC"||!x)){
-    var vt=k==="Y"?'<b class="cy" style="display:inline;margin:0">YES</b>':k==="N"?'<b class="cn" style="display:inline;margin:0">NO</b>':k==="P"?"Present":"Not voting";
-    h+='<div class="row"><span class="k">Party</span><span>'+esc(PN[x.party]||x.party)+'</span></div>'+
-       '<div class="row"><span class="k">Vote</span><span>'+vt+'</span></div>';}
+  var id=d.dataset.id,x=data[id],k=key(x),vac=(k==="VAC"||!x);
+  var h='<div class="nm">'+(vac?"Vacant":esc(x.rep))+"</div>"+'<div class="pr"><span class="k">'+(CH==="senate"?"State":"District")+'</span><span>'+where(id,x)+"</span></div>";
+  if(!vac){
+    var vt=k==="Y"?'<span class="vy">YES</span>':k==="N"?'<span class="vn">NO</span>':k==="P"?"Present":"Not voting";
+    h+='<div class="pr"><span class="k">Party</span><span>'+esc(PN[x.party]||x.party)+'</span></div>'+
+       '<div class="pr"><span class="k">Vote</span><span>'+vt+'</span></div>';}
   tip.innerHTML=h;tip.style.display="block";
   var r=d.getBoundingClientRect(),w=tip.offsetWidth,hh=tip.offsetHeight;
   tip.style.left=Math.min(Math.max(8,r.left+r.width/2-w/2),innerWidth-w-8)+"px";
@@ -227,8 +216,10 @@ function load(j){
       out[id]=x})});
   data=out;
   var rp=Site.resultPill(j.result),tr=document.getElementById("tr");
-  tr.style.display=rp?"":"none";if(rp){tr.textContent=rp.text;tr.className="pill "+rp.c}
-  document.getElementById("bill").textContent=(j.bill?j.bill+" — ":"")+(j.question||"")+" ("+[rp&&rp.known?"":j.result,"Roll Call "+j.roll,j.date?fmtDate(j.date):""].filter(Boolean).join(", ")+")";
+  tr.style.display=rp&&rp.known?"":"none";if(rp&&rp.known){tr.textContent=rp.text.charAt(0)+rp.text.slice(1).toLowerCase();tr.className="pill "+rp.c}
+  document.getElementById("ht").textContent=Site.voteTitle(j);
+  document.title=Site.voteTitle(j)+" \u2014 "+Site.chamberName(CH);
+  document.getElementById("bill").textContent=[Site.chamberName(CH)+" \u00b7 "+Site.ordinal(j.congress||CG)+" Congress",j.question,j.date?fmtDate(j.date):"",rp&&!rp.known?j.result:""].filter(Boolean).join(" \u00b7 ");
   var extra=[];
   if(j.title&&j.title!==j.question)extra.push(j.title);
   if(j.majority&&j.majority!=="1/2")extra.push("Required majority: "+j.majority);
@@ -266,28 +257,33 @@ function buildSVG(){
   var L=layout(),mapW=0;
   L.forEach(function(col){col.px=mapW;mapW+=col.w*PITCH-GAP+CG2});mapW-=CG2;
   var W=Math.max(960,mapW+2*M),out=[],y=M;
-  var title=wrap(cur&&cur.question?((cur.bill?cur.bill+" — ":"")+cur.question):"Roll call vote",Math.floor((W-2*M)/14.5),2);
-  title.forEach(function(t,i){out.push('<text x="'+M+'" y="'+(y+24+i*30)+'" font-size="26" font-weight="700" fill="#1d1d1b">'+esc(t)+'</text>')});
-  y+=title.length*30+4;
-  var rp=Site.resultPill(cur&&cur.result);
-  var sub=[CH==="senate"?"U.S. Senate":"U.S. House",rp&&rp.known?"":(cur&&cur.result),cur&&cur.roll?"Roll Call "+cur.roll:"",cur&&cur.date?fmtDate(cur.date):""].filter(Boolean).join("  ·  ");
-  out.push('<text x="'+M+'" y="'+(y+16)+'" font-size="16" fill="#6b6b66">'+esc(sub)+'</text>');
+  var ttl=cur?Site.voteTitle(cur):"Roll call vote";if(ttl.length>70)ttl=ttl.slice(0,69)+"\u2026";
+  var rp=Site.resultPill(cur&&cur.result),PF={y:"#1e8e4e",n:"#c62828",g:"#6b6b66"};
+  out.push('<text x="'+M+'" y="'+(y+26)+'" font-size="26" font-weight="700" fill="#1d1d1b">'+esc(ttl)+'</text>');
+  if(rp&&rp.known){var rt=rp.text.charAt(0)+rp.text.slice(1).toLowerCase(),rw=30+rt.length*9.5,rx0=M+ttl.length*12.6+16;
+    out.push('<rect x="'+rx0.toFixed(1)+'" y="'+(y+5)+'" width="'+rw+'" height="26" rx="13" fill="'+PF[rp.c]+'"/><text x="'+(rx0+rw/2).toFixed(1)+'" y="'+(y+23)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">'+esc(rt)+'</text>')}
+  y+=44;
+  var sub=[CH==="senate"?"U.S. Senate":"U.S. House",cur&&cur.question,cur&&cur.date?fmtDate(cur.date):"",rp&&!rp.known?(cur&&cur.result):""].filter(Boolean).join("  \u00b7  ");
+  out.push('<text x="'+M+'" y="'+(y+8)+'" font-size="16" fill="#6b6b66">'+esc(sub)+'</text>');
   y+=34;
-  var BW=420,tot=c.yes+c.no,px=M,PF={y:"#1e8e4e",n:"#c62828",g:"#6b6b66"};
-  if(rp){var rw=28+rp.text.length*10.5;
-    out.push('<rect x="'+px+'" y="'+y+'" width="'+rw+'" height="26" rx="13" fill="'+PF[rp.c]+'"/><text x="'+(px+rw/2)+'" y="'+(y+18)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">'+esc(rp.text)+'</text>');
-    px+=rw+10}
-  out.push('<rect x="'+px+'" y="'+y+'" width="96" height="26" rx="13" fill="#1e8e4e"/><text x="'+(px+48)+'" y="'+(y+18)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">YES '+c.yes+'</text>');
-  px+=106;
-  out.push('<rect x="'+px+'" y="'+(y+3)+'" width="'+BW+'" height="20" rx="3" fill="#f1f1ee"/>');
-  var bx=px;
+  var BW=420,tot=c.yes+c.no;
+  out.push('<rect x="'+M+'" y="'+y+'" width="96" height="26" rx="13" fill="#1e8e4e"/><text x="'+(M+48)+'" y="'+(y+18)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">YES '+c.yes+'</text>');
+  out.push('<rect x="'+(M+106)+'" y="'+y+'" width="84" height="26" rx="13" fill="#c62828"/><text x="'+(M+148)+'" y="'+(y+18)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">NO '+c.no+'</text>');
+  y+=38;
+  if(tot){
+    var yp=(100*c.yes/tot).toFixed(1),np=(100-parseFloat(yp)).toFixed(1),yw=c.yes/tot*BW;
+    function brk(x0,w,label,col){
+      out.push('<text x="'+(x0+w/2).toFixed(1)+'" y="'+(y+12)+'" font-size="14" font-weight="700" fill="'+col+'" text-anchor="middle">'+label+'</text>');
+      out.push('<path d="M'+(x0+2).toFixed(1)+' '+(y+26)+' V'+(y+19)+' H'+(x0+w-2).toFixed(1)+' V'+(y+26)+'" fill="none" stroke="#666" stroke-width="1.5"/>')}
+    if(c.yes)brk(M,yw,yp+"%","#1e8e4e");
+    if(c.no)brk(M+yw,BW-yw,np+"%","#c62828");}
+  y+=30;
+  out.push('<rect x="'+M+'" y="'+y+'" width="'+BW+'" height="20" rx="3" fill="#f1f1ee"/>');
+  var bx=M;
   ["dY","rY","iY","dN","rN","iN"].forEach(function(s){
     if(!c[s]||!tot)return;var w=c[s]/tot*BW;
-    out.push('<rect x="'+bx.toFixed(2)+'" y="'+(y+3)+'" width="'+w.toFixed(2)+'" height="20" fill="'+HEX[s]+'"/>');bx+=w});
-  if(tot)out.push('<rect x="'+(px+c.yes/tot*BW-1).toFixed(2)+'" y="'+(y+3)+'" width="2" height="20" fill="#fff"/>');
-  px+=BW+10;
-  out.push('<rect x="'+px+'" y="'+y+'" width="84" height="26" rx="13" fill="#c62828"/><text x="'+(px+42)+'" y="'+(y+18)+'" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">NO '+c.no+'</text>');
-  y+=26+20;
+    out.push('<rect x="'+bx.toFixed(2)+'" y="'+y+'" width="'+w.toFixed(2)+'" height="20" fill="'+HEX[s]+'"/>');bx+=w});
+  y+=20+20;
   out.push('<text x="'+M+'" y="'+(y+4)+'" font-size="14" fill="#6b6b66">Present: '+c.P+'  ·  Not voting: '+c.NV+'  ·  Vacant: '+c.VAC+'</text>');
   y+=34;
   var mx=(W-mapW)/2,mapH=0;
@@ -341,8 +337,7 @@ async function go(){
   if(!k.cg||!k.ss||!k.roll){stat("Vote not found. Use “All votes” to pick one.");return}
   if(k.ch!==CH||k.cg!==CG||!INDEX.length){
     CH=k.ch;CG=k.cg;T=CH==="senate"?SEN:S;B=CH==="senate"?22:11;
-    document.getElementById("h1").textContent=Site.chamberName(CH)+" Vote Map";
-    document.getElementById("back").href="index.html?chamber="+CH+"&congress="+CG;
+    document.getElementById("back").href="votes.html?chamber="+CH+"&congress="+CG;
     try{
       INDEX=await Site.json("data/"+CH+"/"+CG+"/index.json");
     }catch(e){stat("Could not load the vote list ("+e.message+")");return}
@@ -359,7 +354,6 @@ async function go(){
     stat("Loading…");
     var j=await Site.json(INDEX[i].file);
     load(j);showLinks(j);stat("");
-    document.title=Site.chamberName(CH)+" Roll Call "+j.roll+" — Vote Map";
   }catch(e){stat("Could not load that vote ("+e.message+")")}}
 (async function(){
   Site.nav("votes");

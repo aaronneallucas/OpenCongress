@@ -62,10 +62,31 @@ STATES = {
 }
 REQS = 0
 MEMBERS = {}
+T0 = time.time()
+STEP = {"n": 0, "of": 0}
+SUMMARY = []
 
 
 def log(*a):
     print(*a, flush=True)
+
+
+def elapsed():
+    sec = int(time.time() - T0)
+    return "%d:%02d:%02d" % (sec // 3600, sec % 3600 // 60, sec % 60)
+
+
+def step(title):
+    """Announce the start of one of the run's tasks, with elapsed time and requests used so far."""
+    STEP["n"] += 1
+    log("")
+    log("===== Step %d of %d: %s  [elapsed %s, %d API requests so far] =====" % (STEP["n"], STEP["of"], title, elapsed(), REQS))
+
+
+def note(msg):
+    """Log a result line and remember it for the summary at the end of the run."""
+    log(msg)
+    SUMMARY.append(msg)
 
 
 # ---------------------------------------------------------------- HTTP
@@ -385,7 +406,7 @@ def process_house(cg, max_new):
                 e.update(tally(d["members"]))
     if index:
         save_index("house", cg, index)
-    log("House %d: added %d new vote(s); %d total" % (cg, added, len(index)))
+    note("House %d: added %d new vote(s); %d total" % (cg, added, len(index)))
 
 
 # ---------------------------------------------------------------- Senate
@@ -496,7 +517,7 @@ def process_senate(cg, max_new):
             log("saved", web(p))
     if index:
         save_index("senate", cg, index)
-    log("Senate %d: added %d new vote(s); %d total" % (cg, added, len(index)))
+    note("Senate %d: added %d new vote(s); %d total" % (cg, added, len(index)))
 
 
 # ---------------------------------------------------------------- member statistics
@@ -538,6 +559,21 @@ def stats_of(s):
             "partyVotes": sum(s.count(c) for c in "yYnN")}
 
 
+def maverick_of(s, votes, byroll, party):
+    """Maverick score: on every roll call where the member voted against the majority of their own party,
+    add (party members with the majority) minus (party members against). Independents have no party majority."""
+    if party not in ("D", "R"):
+        return 0
+    a, b = ("dY", "dN") if party == "D" else ("rY", "rN")
+    total = 0
+    for i, ch in enumerate(s):
+        if ch in "YN" and i < len(votes):
+            v = byroll.get((votes[i][0], votes[i][1]))
+            if v:
+                total += abs(v.get(a, 0) - v.get(b, 0))
+    return total
+
+
 def touch_directory(dirmap, chamber, cg, rows):
     for m in rows:
         e = dirmap.setdefault(m["id"], {"id": m["id"], "c": {}})
@@ -572,11 +608,15 @@ def update_matrix(chamber, cg, dirmap):
         touch_directory(dirmap, chamber, cg, rows)
     if new:
         save_json(mpath, mx)
+    byroll = {(e["session"], e["roll"]): e for e in index}
     for mid, s in mx["members"].items():
         e = dirmap.get(mid)
         if e is not None:
-            e["c"].setdefault(str(cg), {"chamber": chamber}).update(stats_of(s))
-    log("%s %d: statistics cover %d votes and %d members" % (chamber.title(), cg, len(mx["votes"]), len(mx["members"])))
+            slot = e["c"].setdefault(str(cg), {"chamber": chamber})
+            st = stats_of(s)
+            st["maverick"] = maverick_of(s, mx["votes"], byroll, slot.get("party") or e.get("party"))
+            slot.update(st)
+    note("%s %d: statistics (missed votes, party-line votes, Maverick scores) cover %d votes and %d members" % (chamber.title(), cg, len(mx["votes"]), len(mx["members"])))
 
 
 def write_congresses():
@@ -606,20 +646,27 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
         return ((d or {}).get("updated", ""), latest not in e["c"])
 
     ids.sort(key=key)
+
+    def fresh(e):
+        old = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
+        if not old:
+            return False
+        try:
+            return (today - datetime.date.fromisoformat(old.get("updated", "1970-01-01"))).days < refresh_days
+        except ValueError:
+            return False
+
+    todo = [e for e in ids if not fresh(e)]
+    log("Legislation: %d member(s) in the Congresses being tracked; %d need a refresh (oldest first, refreshed every %d days)." % (len(ids), len(todo), refresh_days))
+    log("  Each member needs requests for sponsored and cosponsored bills; this run may use up to %d requests, so at most %d member(s) can be done (each needs at least 2 requests)." % (budget, min(len(todo), budget // 2)))
     start = REQS
     done = 0
-    for e in ids:
+    tot = {"sponsored": 0, "cosponsored": 0}
+    for e in todo:
         if REQS - start >= budget:
+            log("  Legislation: request budget reached (%d); the remaining %d member(s) will be refreshed on later runs." % (budget, len(todo) - done))
             break
         f = os.path.join(OUT, "legislation", e["id"] + ".json")
-        old = load_json(f, None)
-        if old:
-            try:
-                age = (today - datetime.date.fromisoformat(old.get("updated", "1970-01-01"))).days
-            except ValueError:
-                age = 9999
-            if age < refresh_days:
-                continue
         data = {"updated": today.isoformat(), "congresses": {}}
         try:
             for kind, k in (("sponsored", "sponsoredLegislation"), ("cosponsored", "cosponsoredLegislation")):
@@ -627,6 +674,7 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
                                  lambda j, k=k: find_list(j, k),
                                  lambda x: (x.get("congress"), x.get("type"), x.get("number")),
                                  max_pages=40, quiet=True)
+                tot[kind] += len(items)
                 for x in items:
                     cg = x.get("congress")
                     if cg in cgs:
@@ -642,7 +690,10 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
                 slot[kind].sort(key=lambda x: x.get("date") or "", reverse=True)
         save_json(f, data)
         done += 1
-    log("Legislation: refreshed %d member(s) using %d requests" % (done, REQS - start))
+        if done % 10 == 0 or done == len(todo):
+            log("  Legislation progress: %d of %d member(s) refreshed | %d sponsored and %d cosponsored bills read | %d of %d requests used | elapsed %s"
+                % (done, len(todo), tot["sponsored"], tot["cosponsored"], REQS - start, budget, elapsed()))
+    note("Legislation: refreshed sponsored and cosponsored bills for %d member(s) using %d requests (%d sponsored and %d cosponsored bills read)" % (done, REQS - start, tot["sponsored"], tot["cosponsored"]))
 
 
 # ---------------------------------------------------------------- main
@@ -652,17 +703,42 @@ def main():
     cur = current_congress()
     cgs = sorted(int(x) for x in env.split(",") if x.strip()) if env else [cur - 1, cur]
     max_new = int(os.environ.get("MAX_NEW", "400"))
+    leg_budget = int(os.environ.get("LEG_BUDGET", "1200"))
     dpath = os.path.join(OUT, "members", "directory.json")
     dirmap = {e["id"]: e for e in load_json(dpath, [])}
+
+    plan = []
     for cg in cgs:
+        plan.append("House %d: fetch new roll call votes and member lists (up to %d new votes)" % (cg, max_new))
+        plan.append("Senate %d: fetch new roll call votes from senate.gov (up to %d new votes)" % (cg, max_new))
+        plan.append("Congress %d: recompute member statistics (missed votes, votes against party, Maverick scores)" % cg)
+    plan.append("Save the member directory and the list of Congresses")
+    plan.append("Sponsored and cosponsored bills for members (up to %d requests)" % leg_budget if leg_budget > 0 else
+                "Sponsored and cosponsored bills (skipped: LEG_BUDGET is 0)")
+    STEP["of"] = len(plan)
+    log("Congresses to update: " + ", ".join(str(c) for c in cgs))
+    log("Tasks this run:")
+    for i, t in enumerate(plan, 1):
+        log("  %d. %s" % (i, t))
+
+    for cg in cgs:
+        step("House %d votes" % cg)
         process_house(cg, max_new)
+        step("Senate %d votes" % cg)
         process_senate(cg, max_new)
+        step("Member statistics for Congress %d" % cg)
         update_matrix("house", cg, dirmap)
         update_matrix("senate", cg, dirmap)
+    step("Saving member directory and Congress list")
     save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))
     write_congresses()
-    update_legislation(dirmap, cgs, int(os.environ.get("LEG_BUDGET", "1200")),
-                       int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    log("Saved %d member(s)." % len(dirmap))
+    step("Sponsored and cosponsored bills")
+    update_legislation(dirmap, cgs, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    log("")
+    log("===== Summary (elapsed %s, %d API requests) =====" % (elapsed(), REQS))
+    for line in SUMMARY:
+        log("  " + line)
     log("Done.")
 
 

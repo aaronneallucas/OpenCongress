@@ -4,6 +4,16 @@ on:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
+    inputs:
+      max_new:
+        description: "Max new votes to fetch per chamber and Congress"
+        default: "60"
+      leg_budget:
+        description: "Max API requests for sponsored/cosponsored bills (0 skips them)"
+        default: "150"
+      congresses:
+        description: "Congresses to update, comma separated (blank = previous and current)"
+        default: ""
 
 permissions:
   contents: write
@@ -24,8 +34,9 @@ jobs:
       - name: Fetch new votes, members and legislation
         env:
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
-          MAX_NEW: "400"
-          LEG_BUDGET: "1200"
+          MAX_NEW: ${{ inputs.max_new || '60' }}
+          LEG_BUDGET: ${{ inputs.leg_budget || '150' }}
+          CONGRESSES: ${{ inputs.congresses }}
         run: python update_votes.py
       - name: Commit changes
         run: |

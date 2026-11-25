@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Compare Congresses</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<h1>Compare Congresses</h1>
+<p class="sub" id="sub">Cumulative roll call votes by day since each Congress convened on January 3 of its first year. Hover a chart to compare the same day across Congresses.</p>
+<div class="two">
+  <div class="panel" style="margin-top:0"><h2>House</h2><div class="chart" id="ch-house"></div><div class="lg" id="lg-house"></div></div>
+  <div class="panel" style="margin-top:0"><h2>Senate</h2><div class="chart" id="ch-senate"></div><div class="lg" id="lg-senate"></div></div>
+</div>
+<div class="panel">
+  <h2>Roll calls by Congress</h2>
+  <div class="tblwrap"><table class="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
+  <p class="small" id="note"></p>
+</div>
+<p class="foot">Data: Congress.gov and Senate.gov. Counts include every recorded roll call vote saved on this site, so a Congress still being backfilled may show fewer votes than it really had.</p>
+<script src="site.js"></script>
+<script>
+(async function () {
+  Site.nav("compare");
+  var info = await Site.congresses();
+  if (!info) { document.getElementById("sub").textContent = "No vote data is available yet."; return; }
+  var latest = info.latest, today = Math.min(730, Math.max(0, Math.round((Date.now() - Site.congressStart(latest)) / 86400000)));
+  var S = {};
+  for (var ch of ["house", "senate"]) {
+    S[ch] = await Site.chamberSeries(ch, info, latest);
+    Site.lineChart(document.getElementById("ch-" + ch), S[ch], {label: Site.chamberName(ch) + " roll call votes by Congress"});
+    document.getElementById("lg-" + ch).innerHTML = S[ch].map(function (s) {
+      return '<span><i style="background:' + s.color + '"></i>' + s.label + " (" + s.c.total + ")</span>";
+    }).join("");
+  }
+  document.getElementById("th").innerHTML = "<tr><th>Congress</th><th>Years</th><th class=\"num\">House total</th><th class=\"num\">House by day " + today +
+    "</th><th class=\"num\">Senate total</th><th class=\"num\">Senate by day " + today + "</th></tr>";
+  function cell(ch, cg) {
+    var s = S[ch].filter(function (x) { return x.cg === cg; })[0];
+    return s ? [s.c.total, Site.countAt(s.c, today)] : ["\u2014", "\u2014"];
+  }
+  document.getElementById("tb").innerHTML = info.congresses.map(function (x) {
+    var h = cell("house", x.congress), s = cell("senate", x.congress);
+    return "<tr><td><b>" + Site.ordinal(x.congress) + "</b>" + (x.congress === latest ? " (current)" : "") + "</td><td>" + Site.esc(x.years) +
+      '</td><td class="num">' + h[0] + '</td><td class="num">' + h[1] + '</td><td class="num">' + s[0] + '</td><td class="num">' + s[1] + "</td></tr>";
+  }).join("");
+  document.getElementById("note").textContent = "\u201cBy day " + today + "\u201d is how many roll calls each Congress had held by the same point in its term as today is in the " + Site.ordinal(latest) + ".";
+})();
+</script>
+</body>
+</html>

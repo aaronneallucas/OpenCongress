@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Members</title>
 <link rel="stylesheet" href="site.css">
+<style>.rk{color:var(--muted);font-size:12px;margin-left:4px}</style>
 </head>
 <body>
 <div id="nav"></div>
@@ -16,11 +17,11 @@
 </div>
 <p class="small" id="count"></p>
 <div class="tblwrap"><table class="tbl" id="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
-<p class="small" style="margin-top:14px">Missed votes: share of roll calls, while serving, where the member was recorded as Not Voting. Against party: share of the member's Yea/Nay votes that went against the majority of their own party on that roll call (ties, Present votes, and independents are not counted). The data does not say why a vote was missed.</p>
+<p class="small" style="margin-top:14px">Missed votes: share of roll calls, while serving, where the member was recorded as Not Voting. Against party: share of the member's Yea/Nay votes that went against the majority of their own party on that roll call (ties, Present votes, and independents are not counted). Maverick score: on each roll call where a member voted against their party's majority, they earn the number of party members who voted with the majority minus the number who voted against, summed over all such votes. Rank #1 means the most missed votes, the highest against-party share, or the highest Maverick score in that chamber and Congress. Missed and against-party ranks require at least a quarter of the chamber's maximum number of votes, so members who served briefly are not ranked. The data does not say why a vote was missed.</p>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var CH="house",CG=119,ALL=[],pf="ALL",sortKey="name",sortDir=1,esc=Site.esc;
+var CH="house",CG=119,ALL=[],R=null,pf="ALL",sortKey="name",sortDir=1,esc=Site.esc;
 
 function stat(e){return e.c[CG]}
 function pct(n,d){return d?n/d:null}
@@ -32,8 +33,10 @@ var COLS=[
   {k:"district",t:"District",house:true,val:function(e){return stat(e).district||0}},
   {k:"votes",t:"Votes",num:true,val:function(e){return stat(e).eligible}},
   {k:"missed",t:"Missed",num:true,val:function(e){var s=stat(e);return pct(s.missed,s.eligible)}},
-  {k:"against",t:"Against party",num:true,val:function(e){var s=stat(e);return pct(s.against,s.partyVotes)}}
+  {k:"against",t:"Against party",num:true,val:function(e){var s=stat(e);return pct(s.against,s.partyVotes)}},
+  {k:"maverick",t:"Maverick score",num:true,val:function(e){var s=stat(e);return s.partyVotes?(s.maverick||0):null}}
 ];
+function rk(kind,id){var r=R&&R[kind].map[id];return r?' <span class="rk">#'+r+'</span>':""}
 function cols(){return COLS.filter(function(c){return !c.house||CH==="house"})}
 function head(){
   document.getElementById("th").innerHTML="<tr>"+cols().map(function(c){
@@ -60,8 +63,9 @@ function draw(){
     return"<tr><td><a href=\""+Site.memberHref(e.id,CG)+"\">"+esc(e.last+", "+e.first)+"</a></td>"+
       '<td><span class="badge '+p+'">'+esc(s.party||"?")+"</span></td><td>"+esc(s.state)+"</td>"+
       (CH==="house"?"<td>"+(s.district||"—")+"</td>":"")+
-      '<td class="num">'+s.eligible+'</td><td class="num">'+s.missed+" ("+fmtPct(s.missed,s.eligible)+')</td>'+
-      '<td class="num">'+(s.partyVotes?s.against+" ("+fmtPct(s.against,s.partyVotes)+")":"—")+"</td></tr>"}).join("");
+      '<td class="num">'+s.eligible+'</td><td class="num">'+s.missed+" ("+fmtPct(s.missed,s.eligible)+")"+rk("missed",e.id)+'</td>'+
+      '<td class="num">'+(s.partyVotes?s.against+" ("+fmtPct(s.against,s.partyVotes)+")"+rk("against",e.id):"—")+"</td>"+
+      '<td class="num">'+(s.partyVotes?(s.maverick||0).toLocaleString()+rk("maverick",e.id):"—")+"</td></tr>"}).join("");
 }
 function chips(){
   var h="";
@@ -85,6 +89,7 @@ document.getElementById("find").oninput=draw;
   try{dir=await Site.json("data/members/directory.json")}
   catch(e){document.getElementById("count").textContent="Member data is not available yet ("+e.message+").";return}
   ALL=dir.filter(function(e){var s=e.c&&e.c[CG];return s&&s.chamber===CH&&s.eligible>0});
+  R=Site.ranks(ALL,CH,CG);
   chips();draw();
 })();
 </script>
