@@ -41,15 +41,26 @@ def get(path, **params):
     raise RuntimeError("Request failed: " + path)
 
 
-def paged(path, finder):
-    items, offset = [], 0
-    while True:
+def log(*a):
+    print(*a, flush=True)
+
+
+def paged(path, finder, keyfn, max_pages=20):
+    """Fetch every page. Stops when a page is short, repeats itself, or adds nothing new."""
+    items, seen, offset, first = [], set(), 0, None
+    for _ in range(max_pages):
+        log("  GET", path, "offset", offset)
         j = get(path, offset=offset)
+        if first is None:
+            first = j
         page = finder(j) if j else []
-        items += page
-        if len(page) < 250:
-            return items
+        new = [x for x in page if keyfn(x) not in seen]
+        seen.update(keyfn(x) for x in new)
+        items += new
+        if len(page) < 250 or not new:
+            break
         offset += 250
+    return items, first
 
 
 def find_list(j, preferred):
@@ -76,11 +87,10 @@ def save_json(path, obj):
 
 
 def fetch_members(cg):
-    out = {}
-    for m in paged("/member/congress/" + str(cg), lambda j: find_list(j, "members")):
-        if m.get("bioguideId"):
-            out[m["bioguideId"]] = m.get("district")
-    return out
+    log("Fetching member list for Congress", cg)
+    items, _ = paged("/member/congress/" + str(cg), lambda j: find_list(j, "members"),
+                     lambda m: m.get("bioguideId"))
+    return {m["bioguideId"]: m.get("district") for m in items if m.get("bioguideId")}
 
 
 def main():
@@ -102,19 +112,23 @@ def main():
 
     added = 0
     for ss in sessions:
-        votes = paged("/house-vote/%d/%s" % (cg, ss), lambda j: find_list(j, "houseRollCallVotes"))
+        log("Listing votes for session", ss)
+        votes, _ = paged("/house-vote/%d/%s" % (cg, ss), lambda j: find_list(j, "houseRollCallVotes"),
+                         lambda x: x.get("rollCallNumber"))
+        log("  found", len(votes), "votes")
         for v in sorted(votes, key=lambda x: x.get("rollCallNumber") or 0):
             roll = v.get("rollCallNumber")
             if roll is None or (cg, int(ss), roll) in have:
                 continue
             if added >= max_new:
                 break
-            detail = paged("/house-vote/%d/%s/%d/members" % (cg, int(ss), roll),
-                           lambda j: ((j or {}).get("houseRollCallVoteMemberVotes") or {}).get("results", []))
+            log("Vote", ss, roll)
+            detail, first = paged("/house-vote/%d/%s/%d/members" % (cg, int(ss), roll),
+                                  lambda j: ((j or {}).get("houseRollCallVoteMemberVotes") or {}).get("results", []),
+                                  lambda m: m["bioguideID"])
             if not detail:
                 continue  # not published yet; try again next run
-            head = get("/house-vote/%d/%s/%d/members" % (cg, int(ss), roll), limit=1)
-            R = (head or {}).get("houseRollCallVoteMemberVotes", {})
+            R = (first or {}).get("houseRollCallVoteMemberVotes", {})
             if any(m["bioguideID"] not in members for m in detail) and not refreshed:
                 members = fetch_members(cg)
                 save_json(mem_path, members)
@@ -141,7 +155,7 @@ def main():
             index.append(dict(meta, yes=yes, no=no, file="data/" + fname if out_dir == "data" else fname))
             have.add((cg, int(ss), roll))
             added += 1
-            print("saved", fname, flush=True)
+            log("saved", fname)
     index.sort(key=lambda x: (x.get("date") or "", x["roll"]), reverse=True)
     save_json(index_path, index)
     print("added %d new vote(s); %d total" % (added, len(index)))

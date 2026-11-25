@@ -209,7 +209,7 @@ function conv(){
   R.results.forEach(function(m){
     var d=dmap&&dmap[m.bioguideID],
         x={rep:m.firstName+" "+m.lastName,party:m.voteParty,vote:m.voteCast};
-    if(d&&S[d.split("-")[0]])out[d]=x;
+    if(d&&S[d.split("-")[0]]&&!out[d])out[d]=x;
     else{x.last=m.lastName;(by[m.voteState]=by[m.voteState]||[]).push(x)}});
   Object.keys(by).forEach(function(st){
     if(!S[st])return;
