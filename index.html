@@ -5,21 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>House Roll Call Votes</title>
 <style>
-:root{--bg:#fafaf7;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#d9d9d2;--yes:#1e8e4e;--no:#c62828;
+:root{--fg:#1d1d1b;--muted:#6b6b66;--line:#d9d9d2;--yes:#1e8e4e;--no:#c62828;
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181a;--fg:#ececea;--muted:#9a9a94;--card:#222427;--line:#3a3c40;--yes:#4cc27f;--no:#ef6b6b}}
-:root[data-theme="dark"]{--bg:#17181a;--fg:#ececea;--muted:#9a9a94;--card:#222427;--line:#3a3c40;--yes:#4cc27f;--no:#ef6b6b}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
-body{margin:0 auto;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:20px clamp(16px,5vw,48px);max-width:860px}
+body{margin:0 auto;background:#fff;color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;padding:20px clamp(16px,5vw,48px);max-width:860px}
 h1{font-size:24px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 16px}
-input,button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+input,button{font:inherit;color:var(--fg);background:#fff;border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+button{cursor:pointer}
 #find{width:100%;box-sizing:border-box;margin-bottom:14px}
-.row{display:block;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px}
+.row{display:block;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:8px}
 .row:hover{border-color:var(--fg)}
 .t{font-size:16px}.m{color:var(--muted);font-size:13px;margin:2px 0 8px}
-.b{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--line)}.b i{display:block;height:100%}
-.c{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-top:4px}
+.bw{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.b{display:flex;height:18px;width:320px;max-width:100%;border-radius:4px;overflow:hidden;background:#f1f1ee;border:1px solid var(--line);box-sizing:border-box}.b i{display:block;height:100%}
+.c{display:flex;gap:12px;font-size:14px;font-weight:700;white-space:nowrap}
 .c .y{color:var(--yes)}.c .n{color:var(--no)}
+.x{color:var(--muted);font-size:12px;margin-top:6px}
 #more{display:none;margin:8px auto 0}
 .foot{color:var(--muted);font-size:13px;margin-top:20px}
 </style>
@@ -34,19 +35,25 @@ input,button{font:inherit;color:var(--fg);background:var(--card);border:1px soli
 <p class="foot">Data: Congress.gov</p>
 <script>
 var IDX=[],shown=40;
+var HEX={dY:"#1f4e9c",dN:"#8fb4e8",rY:"#b21f1f",rN:"#eba0a0",iY:"#5b2a86",iN:"#b99ad6"};
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function fmtDate(d){if(!d)return"";var t=new Date(d);return isNaN(t)?d:t.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
+function bar(v){
+  var segs;
+  if("dY" in v)segs=["dY","rY","iY","dN","rN","iN"].map(function(k){return[v[k],HEX[k]]});
+  else segs=[[v.yes,"#1e8e4e"],[v.no,"#c62828"]];
+  var t=0;segs.forEach(function(s){t+=s[0]||0});
+  return '<div class="b">'+segs.map(function(s){return s[0]?'<i style="width:'+(s[0]/t*100)+'%;background:'+s[1]+'"></i>':""}).join("")+'</div>';}
 function draw(){
   var q=document.getElementById("find").value.toLowerCase();
   var f=IDX.filter(function(v){
     return !q||[v.bill,v.question,v.result,"roll "+v.roll,v.roll,fmtDate(v.date)].join(" ").toLowerCase().indexOf(q)>-1});
   document.getElementById("list").innerHTML=f.slice(0,shown).map(function(v){
-    var t=(v.yes+v.no)||1;
+    var other=("present" in v)?'<div class="x">Present '+v.present+' \u00b7 Not voting '+v.notVoting+'</div>':"";
     return '<a class="row" href="vote.html#'+v.congress+'-'+v.session+'-'+v.roll+'">'+
       '<div class="t">'+(v.bill?'<b>'+esc(v.bill)+'</b> \u00b7 ':'')+esc(v.question||"Roll call")+'</div>'+
       '<div class="m">Roll '+v.roll+' \u00b7 '+esc(fmtDate(v.date))+(v.result?' \u00b7 '+esc(v.result):'')+'</div>'+
-      '<div class="b"><i style="width:'+(v.yes/t*100)+'%;background:var(--yes)"></i><i style="width:'+(v.no/t*100)+'%;background:var(--no)"></i></div>'+
-      '<div class="c"><span class="y">YES '+v.yes+'</span><span class="n">NO '+v.no+'</span></div></a>'}).join("");
+      '<div class="bw">'+bar(v)+'<div class="c"><span class="y">YES '+v.yes+'</span><span class="n">NO '+v.no+'</span></div></div>'+other+'</a>'}).join("");
   var more=document.getElementById("more");
   more.style.display=f.length>shown?"block":"none";
   document.getElementById("msg").textContent=f.length?"":(IDX.length?"No votes match your search.":"");}

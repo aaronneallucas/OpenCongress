@@ -87,6 +87,24 @@ def save_json(path, obj):
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
 
 
+def tally(rows):
+    """Per-party YES/NO counts plus Present / Not Voting, for the front page bars."""
+    t = {"dY": 0, "dN": 0, "rY": 0, "rN": 0, "iY": 0, "iN": 0, "present": 0, "notVoting": 0}
+    for m in rows:
+        v = (m.get("vote") or "").lower()
+        p = (m.get("party") or "").upper()
+        p = p.lower() if p in ("D", "R") else "i"
+        if v in YES:
+            t[p + "Y"] += 1
+        elif v in NO:
+            t[p + "N"] += 1
+        elif v == "present":
+            t["present"] += 1
+        elif v == "not voting":
+            t["notVoting"] += 1
+    return t
+
+
 def fetch_members(cg):
     log("Fetching member list for Congress", cg)
     items, _ = paged("/member/congress/" + str(cg), lambda j: find_list(j, "members"),
@@ -103,6 +121,11 @@ def main():
     index_path = os.path.join(out_dir, "index.json")
     index = load_json(index_path, [])
     have = {(v["congress"], v["session"], v["roll"]) for v in index}
+    for e in index:  # fill in party counts for votes saved by an older version
+        if "dY" not in e:
+            d = load_json(os.path.join(out_dir, "votes", "%d-%d-%d.json" % (e["congress"], e["session"], e["roll"])), None)
+            if d:
+                e.update(tally(d["members"]))
 
     mem_path = os.path.join(out_dir, "members-%d.json" % cg)
     members = load_json(mem_path, None)
@@ -155,7 +178,7 @@ def main():
                     "amendmentAuthor": R.get("amendmentAuthor")}
             fname = "votes/%d-%d-%d.json" % (cg, int(ss), roll)
             save_json(os.path.join(out_dir, fname), dict(meta, members=rows))
-            index.append(dict(meta, yes=yes, no=no, file="data/" + fname if out_dir == "data" else fname))
+            index.append(dict(meta, yes=yes, no=no, **tally(rows), file="data/" + fname if out_dir == "data" else fname))
             have.add((cg, int(ss), roll))
             added += 1
             log("saved", fname)
