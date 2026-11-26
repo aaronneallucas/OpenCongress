@@ -87,7 +87,8 @@
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
       '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div>' +
-      '<div class="tab' + (active === "data" ? " on" : "") + '"><button type="button" data-href="data.html">Data</button></div></nav>';
+      '<div class="tab' + (active === "data" ? " on" : "") + '"><button type="button" data-href="data.html">Data</button></div>' +
+      '<div class="tab' + (active === "you" ? " on" : "") + '"><button type="button" data-href="you.html">Rep. You</button></div></nav>';
     host.querySelectorAll("[data-href]").forEach(function (b) { b.addEventListener("click", function () { location.href = b.dataset.href; }); });
     var tabs = host.querySelectorAll(".dd");
     function closeAll() {
@@ -289,6 +290,44 @@
       if (r.common >= need) out.push({id: o, pct: r.pct, same: r.same, common: r.common});
     });
     return out;
+  };
+
+
+  /* ---------- Rep. You: the visitor's own picks, kept only in this browser ---------- */
+  var YK = "oc-you-v1";
+  function yload() { try { var d = JSON.parse(localStorage.getItem(YK) || "null"); if (d && d.v) return d; } catch (e) {} return {on: false, v: {}}; }
+  function ysave(d) { try { localStorage.setItem(YK, JSON.stringify(d)); return true; } catch (e) { return false; } }
+  Site.you = {
+    on: function () { return !!yload().on; },
+    setOn: function (b) { var d = yload(); d.on = !!b; ysave(d); },
+    key: function (cg, ch, ss, roll) { return cg + "-" + ch + "-" + ss + "-" + roll; },
+    get: function (cg, ch, ss, roll) { return yload().v[Site.you.key(cg, ch, ss, roll)] || 0; },
+    set: function (cg, ch, ss, roll, val) { var d = yload(), k = Site.you.key(cg, ch, ss, roll); if (val) d.v[k] = val; else delete d.v[k]; ysave(d); },
+    count: function (cg, ch) { var n = 0, p = cg + "-" + ch + "-", v = yload().v; Object.keys(v).forEach(function (k) { if (k.indexOf(p) === 0) n++; }); return n; },
+    clear: function () { var d = yload(); d.v = {}; ysave(d); },
+    /* the picks as a string in the same format as a matrix row: y / n / - for each roll call, in matrix order */
+    vec: function (mx, cg, ch) {
+      var v = yload().v;
+      return mx.votes.map(function (r) { var x = v[Site.you.key(cg, ch, r[0], r[1])]; return x > 0 ? "y" : x < 0 ? "n" : "-"; }).join("");
+    },
+    csv: function () {
+      var v = yload().v, rows = [["Congress", "Chamber", "Session", "Roll", "Vote"]];
+      Object.keys(v).sort().forEach(function (k) { var p = k.split("-"); rows.push([p[0], p[1], p[2], p[3], v[k] > 0 ? "Yes" : "No"]); });
+      return "\ufeff" + rows.map(function (r) { return r.join(","); }).join("\r\n") + "\r\n";
+    },
+    /* read a CSV exported by csv(); only rows for this Congress are kept. Returns {added, skipped} */
+    importCsv: function (text, cg) {
+      var d = yload(), added = 0, skipped = 0;
+      String(text).replace(/^\ufeff/, "").split(/\r?\n/).forEach(function (line, i) {
+        var c = line.split(",").map(function (x) { return x.trim().replace(/^"|"$/g, ""); });
+        if (c.length < 5 || (i === 0 && isNaN(parseInt(c[0], 10)))) return;
+        var ch = c[1].toLowerCase(), val = c[4].toLowerCase(), ss = parseInt(c[2], 10), roll = parseInt(c[3], 10);
+        var yv = /^(yes|y|yea|1)$/.test(val) ? 1 : /^(no|n|nay|-1)$/.test(val) ? -1 : 0;
+        if (parseInt(c[0], 10) !== cg || (ch !== "house" && ch !== "senate") || !ss || !roll || !yv) { skipped++; return; }
+        d.v[Site.you.key(cg, ch, ss, roll)] = yv; added++;
+      });
+      d.on = true; ysave(d); return {added: added, skipped: skipped};
+    }
   };
 
   window.Site = Site;

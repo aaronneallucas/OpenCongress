@@ -50,6 +50,7 @@ h1 .pill{font-size:15px;vertical-align:middle;margin-left:8px}
 
 <div class="nav2"><a id="back" href="votes.html">&larr; All votes</a><a id="newer" style="display:none">&larr; Newer vote</a><a id="older" style="display:none">Older vote &rarr;</a><span class="small" id="stat"></span></div>
 <p class="small" id="warn"></p>
+<div id="yb" class="yb" style="display:none"></div>
 <div class="vtop">
 <div class="vleft"><div id="ptab"></div><div id="tally"></div><div class="small" id="other"></div><div class="lg2" id="legend"></div></div>
 <div class="vright"><div class="wrap"><div id="map"></div></div></div>
@@ -341,6 +342,14 @@ function parseKey(){
   var p=location.hash.slice(1).split("-");
   if(p[0]==="house"||p[0]==="senate")return{ch:p[0],cg:+p[1],ss:+p[2],roll:+p[3]};
   return{ch:"house",cg:+p[0],ss:+p[1],roll:+p[2]};}
+async function youBox(k){
+  var el=document.getElementById("yb"),info=await Site.congresses();
+  if(!Site.you.on()||!info||k.cg!==info.latest){el.style.display="none";return}
+  var cur=Site.you.get(k.cg,k.ch,k.ss,k.roll);
+  el.style.display="";
+  el.innerHTML='<b>How would you have voted?</b> <button class="yv'+(cur>0?' on y':'')+'" data-v="1">Yes</button><button class="yv'+(cur<0?' on n':'')+'" data-v="-1">No</button><button class="yv" data-v="0">Skip</button> <a href="you.html">Rep. You &rarr;</a><span class="small"> Saved only in this browser.</span>';
+  el.querySelectorAll("button").forEach(function(b){b.onclick=function(){Site.you.set(k.cg,k.ch,k.ss,k.roll,parseInt(b.dataset.v,10));youBox(k)}});
+}
 async function go(){
   var k=parseKey();
   if(!k.cg||!k.ss||!k.roll){stat("Vote not found. Use “All votes” to pick one.");return}
@@ -362,7 +371,7 @@ async function go(){
   try{
     stat("Loading…");
     var j=await Site.json(INDEX[i].file);
-    load(j);showLinks(j);stat("");
+    load(j);showLinks(j);stat("");youBox(k);
   }catch(e){stat("Could not load that vote ("+e.message+")")}}
 (async function(){
   Site.nav("votes");

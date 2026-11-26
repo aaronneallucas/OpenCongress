@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rep. You — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+<style>
+.tg{display:flex;align-items:center;gap:10px;margin:10px 0 14px;font-size:16px}
+.vr{display:grid;grid-template-columns:1fr auto;gap:6px 14px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--line)}
+.vr .t{font-size:14px}.vr .t small{color:var(--muted);display:block}
+.vr .bt{display:flex;gap:6px}
+.msg{font-size:13px;color:var(--muted);margin:6px 0}
+</style>
+</head>
+<body>
+<div id="nav"></div>
+<h1>Rep. You</h1>
+<p class="sub">Mark how you would have voted on this Congress's roll calls and see which members vote most like you, as if you were a member of Congress.</p>
+
+<label class="tg"><input type="checkbox" id="on"> Turn on Rep. You</label>
+<p class="small">When on, every vote page shows Yes / No buttons, and you appear as a black dot with a gold ring on your own voting map, reached from this page (it never appears on the main Relationships tab). You never appear in the member lists or vote lists. Your picks are saved only in this browser. Rep. You covers the current Congress only.</p>
+
+<div id="main" style="display:none">
+  <div class="panel">
+    <h2>Your profile</h2>
+    <div class="chips" id="chs"></div>
+    <div class="cards" id="cards"></div>
+    <p class="msg" id="pmsg"></p>
+    <div class="chips" id="pf"></div>
+    <div class="two">
+      <div><h2 class="cy">Votes most like you</h2><ul class="blist" id="top"></ul></div>
+      <div><h2 class="cn">Votes least like you</h2><ul class="blist" id="low"></ul></div>
+    </div>
+    <p class="small"><a id="maplink" href="relationships.html">See where you land on the voting map &rarr;</a></p>
+  </div>
+
+  <div class="panel">
+    <h2>Mark your votes</h2>
+    <div class="chips"><button id="funa" class="on">Unanswered</button><button id="fall">All votes</button><input id="vq" type="search" placeholder="Search bill, topic or roll number" style="flex:1 1 220px;max-width:340px"></div>
+    <div id="vlist"></div>
+    <button id="more" style="display:none;margin-top:10px">Show more</button>
+  </div>
+
+  <div class="panel">
+    <h2>Your data</h2>
+    <p class="small">Export your picks as a CSV to back them up or move them to another browser, then import that file there. Importing adds to your existing picks.</p>
+    <div class="dl"><button id="exp">Export CSV</button><button id="imp">Import CSV</button><button id="clr">Clear all my picks</button></div>
+    <input type="file" id="file" accept=".csv,text/csv" style="display:none">
+    <p class="msg" id="dmsg"></p>
+  </div>
+</div>
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,CH="house",INDEX=[],MX=null,DIR=[],BYID={},PF="ALL",SHOW=30,UNA=true;
+function pc(p){return p==="D"||p==="R"?p:"I"}
+function pn(p){return{D:"Democratic",R:"Republican",I:"Independent"}[p]}
+
+async function loadChamber(){
+  document.getElementById("pmsg").textContent="Loading…";
+  try{
+    var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);
+    MX=r[0];INDEX=r[1].slice().sort(function(a,b){return(b.date||"")<(a.date||"")?-1:(b.date||"")>(a.date||"")?1:(b.session-a.session)||(b.roll-a.roll)});
+  }catch(e){MX=null;INDEX=[];document.getElementById("pmsg").textContent="Voting data for this chamber is not available yet.";}
+  render();
+}
+
+function profile(){
+  var n=Site.you.count(CG,CH),yv=MX?Site.you.vec(MX,CG,CH):"",yes=(yv.match(/y/g)||[]).length,no=(yv.match(/n/g)||[]).length,tot=yes+no;
+  var cards=[["Votes you marked",tot,(CH==="house"?"House":"Senate")+" roll calls this Congress"],
+    ["Yes / No",yes+" / "+no,tot?(100*yes/tot).toFixed(1)+"% Yes":"—"]],top="",low="";
+  var msg="";
+  if(MX&&tot>=10){
+    var rows=[];
+    DIR.forEach(function(e){var c=e.c&&e.c[CG];if(!c||c.chamber!==CH||!MX.members[e.id])return;
+      var a=Site.agree(yv,MX.members[e.id]);if(a.common>=Math.max(10,0.5*Math.min(tot,Site.castCount(MX.members[e.id]))))rows.push({e:e,c:c,pct:a.pct,same:a.same,common:a.common})});
+    var party={D:[0,0],R:[0,0],I:[0,0]};
+    rows.forEach(function(r){var p=pc(r.c.party);party[p][0]+=r.pct;party[p][1]++});
+    ["D","R","I"].forEach(function(p){if(party[p][1])cards.push(["Agree with "+pn(p)+"s",(party[p][0]/party[p][1]).toFixed(1)+"%","average over "+party[p][1]+" members"])});
+    var f=rows.filter(function(r){return PF==="ALL"||pc(r.c.party)===PF});
+    f.sort(function(a,b){return b.pct-a.pct||b.common-a.common});
+    var li=function(r){return'<li><a href="'+Site.memberHref(r.e.id,CG)+'">'+esc(r.e.first+" "+r.e.last)+'</a> <span class="bd">'+esc(pc(r.c.party)+"-"+r.c.state+(CH==="house"&&r.c.district?"-"+r.c.district:""))+'</span> <b>'+r.pct.toFixed(1)+'%</b> <span class="bd">'+r.same+" of "+r.common+" votes</span></li>"};
+    top=f.slice(0,10).map(li).join("");low=f.slice(-10).reverse().map(li).join("");
+    if(!f.length)msg="No members match this filter yet.";
+    msg=msg||"Agreement is the share of roll calls, where you and the member both voted Yes or No, on which you voted the same way.";
+  }else msg=tot<10?"Mark at least 10 Yes or No votes in the "+(CH==="house"?"House":"Senate")+" to see your matches ("+tot+" so far).":"";
+  document.getElementById("cards").innerHTML=cards.map(function(c){return'<div class="card"><div class="k">'+esc(c[0])+'</div><div class="v">'+esc(String(c[1]))+'</div><div class="d">'+esc(c[2])+'</div></div>'}).join("");
+  document.getElementById("top").innerHTML=top;document.getElementById("low").innerHTML=low;
+  document.getElementById("pmsg").textContent=msg;
+  document.getElementById("maplink").href="relationships.html?chamber="+CH+"&congress="+CG+"&you=1";
+}
+
+function chips(){
+  document.getElementById("chs").innerHTML=["house","senate"].map(function(c){return'<button data-c="'+c+'"'+(c===CH?' class="on"':'')+'>'+(c==="house"?"House":"Senate")+'</button>'}).join("");
+  document.querySelectorAll("#chs button").forEach(function(b){b.onclick=function(){CH=b.dataset.c;SHOW=30;chips();loadChamber()}});
+  document.getElementById("pf").innerHTML=[["ALL","All members"],["D","Democrats"],["R","Republicans"],["I","Independents"]].map(function(p){return'<button data-p="'+p[0]+'"'+(p[0]===PF?' class="on"':'')+'>'+p[1]+'</button>'}).join("");
+  document.querySelectorAll("#pf button").forEach(function(b){b.onclick=function(){PF=b.dataset.p;chips();profile()}});
+}
+
+function list(){
+  var q=document.getElementById("vq").value.toLowerCase().trim(),L=document.getElementById("vlist");
+  var rows=INDEX.filter(function(v){
+    if(UNA&&Site.you.get(CG,CH,v.session,v.roll))return false;
+    if(!q)return true;
+    return (Site.voteTitle(v)+" "+(v.question||"")+" "+(v.bill||"")+" "+v.roll).toLowerCase().indexOf(q)>-1});
+  L.innerHTML=rows.slice(0,SHOW).map(function(v){
+    var cur=Site.you.get(CG,CH,v.session,v.roll),rp=Site.resultPill(v.result);
+    return'<div class="vr"><div class="t"><a href="'+Site.voteHref(CH,CG,v.session,v.roll)+'"><b>'+esc(Site.voteTitle(v))+'</b></a> '+(rp?'<span class="pill '+rp.c+'" style="font-size:11px;padding:1px 8px">'+esc(rp.text)+'</span>':"")+'<small>'+esc(Site.fmtDate(v.date))+(v.question?" · "+esc(v.question):"")+'</small></div>'+
+      '<div class="bt" data-s="'+v.session+'" data-r="'+v.roll+'"><button class="yv'+(cur>0?" on y":"")+'" data-v="1">Yes</button><button class="yv'+(cur<0?" on n":"")+'" data-v="-1">No</button><button class="yv" data-v="0">Skip</button></div></div>'}).join("")||'<p class="small">'+(UNA?"No unanswered votes match.":"No votes match.")+'</p>';
+  document.getElementById("more").style.display=rows.length>SHOW?"":"none";
+  L.querySelectorAll(".bt").forEach(function(bt){bt.querySelectorAll("button").forEach(function(b){b.onclick=function(){
+    var v=parseInt(b.dataset.v,10);Site.you.set(CG,CH,parseInt(bt.dataset.s,10),parseInt(bt.dataset.r,10),v);
+    if(UNA&&v){var row=bt.closest(".vr");row.style.opacity=.4}else{list()}
+    profile();clearTimeout(window._t);window._t=setTimeout(list,UNA&&v?700:0)}})});
+}
+function render(){profile();list()}
+
+function sync(){
+  var on=Site.you.on();document.getElementById("on").checked=on;
+  document.getElementById("main").style.display=on?"":"none";
+  if(on&&!MX&&!INDEX.length)loadChamber();
+}
+(async function(){
+  Site.nav("you");
+  var info=await Site.congresses();CG=info?info.latest:119;
+  try{DIR=await Site.json("data/members/directory.json")}catch(e){DIR=[]}
+  chips();
+  document.getElementById("on").onchange=function(){Site.you.setOn(this.checked);sync()};
+  document.getElementById("funa").onclick=function(){UNA=true;this.classList.add("on");document.getElementById("fall").classList.remove("on");SHOW=30;list()};
+  document.getElementById("fall").onclick=function(){UNA=false;this.classList.add("on");document.getElementById("funa").classList.remove("on");SHOW=30;list()};
+  document.getElementById("vq").oninput=function(){SHOW=30;list()};
+  document.getElementById("more").onclick=function(){SHOW+=30;list()};
+  document.getElementById("exp").onclick=function(){
+    var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([Site.you.csv()],{type:"text/csv;charset=utf-8"}));a.download="rep-you-"+CG+".csv";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500)};
+  document.getElementById("imp").onclick=function(){document.getElementById("file").click()};
+  document.getElementById("file").onchange=function(){var f=this.files[0];if(!f)return;var rd=new FileReader();
+    rd.onload=function(){var r=Site.you.importCsv(rd.result,CG);document.getElementById("dmsg").textContent="Imported "+r.added+" pick"+(r.added===1?"":"s")+(r.skipped?"; skipped "+r.skipped+" row(s) that were not Yes/No picks for the "+Site.ordinal(CG)+" Congress.":".");sync();render()};
+    rd.readAsText(f);this.value=""};
+  document.getElementById("clr").onclick=function(){if(confirm("Delete all of your saved picks from this browser?")){Site.you.clear();document.getElementById("dmsg").textContent="Your picks were cleared.";render()}};
+  sync();
+})();
+</script>
+</body>
+</html>
