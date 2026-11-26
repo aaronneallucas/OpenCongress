@@ -103,7 +103,7 @@ input[type=search],input[type=text]{width:100%}
 .lg2>div{display:flex;align-items:center;gap:5px}
 .lg2 .ltr{width:18px;height:18px;border-radius:3px;color:#fff;font-weight:700;font-size:12px;display:inline-flex;align-items:center;justify-content:center;margin-right:3px}
 .lg2 .sw{width:16px;height:16px}
-.vtop{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap}
-.vleft{flex:0 0 auto;max-width:100%}
-.vright{flex:1 1 0;min-width:0}
+.vtop{display:flex;gap:28px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+.vleft{flex:0 0 372px;max-width:100%}
+.vright{flex:1 1 730px;min-width:0}
 .law{background:#1e8e4e;color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;white-space:nowrap;margin-left:4px}
