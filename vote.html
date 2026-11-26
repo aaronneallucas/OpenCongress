@@ -48,12 +48,11 @@ h1 .pill{font-size:15px;vertical-align:middle;margin-left:8px}
 <p class="small" id="links"></p>
 
 <div class="nav2"><a id="back" href="votes.html">&larr; All votes</a><a id="newer" style="display:none">&larr; Newer vote</a><a id="older" style="display:none">Older vote &rarr;</a><span class="small" id="stat"></span></div>
-<div id="tally"></div>
-<div class="small" id="other"></div>
 <p class="small" id="warn"></p>
-
-<div class="legend" id="legend"></div>
-<div class="wrap"><div id="map"></div></div>
+<div class="vtop">
+<div class="vleft"><div id="ptab"></div><div id="tally"></div><div class="small" id="other"></div><div class="lg2" id="legend"></div></div>
+<div class="vright"><div class="wrap"><div id="map"></div></div></div>
+</div>
 <div class="dl"><span>Download:</span><button id="dpng">PNG</button><button id="dsvg">SVG</button><button id="dcsv">CSV</button></div>
 
 <div class="searchrow"><input id="q" type="search" placeholder="Search members by name, state, or district" aria-label="Search members"><span class="small" id="qn" style="margin:0"></span></div>
@@ -106,15 +105,22 @@ function color(x){
   return HEX.VAC;}
 function ids(){var a=[];Object.keys(T).forEach(function(st){for(var i=1;i<=T[st][2];i++)a.push(st+"-"+(i<10?"0":"")+i)});return a}
 function counts(){
-  var c={dY:0,dN:0,rY:0,rN:0,iY:0,iN:0,P:0,NV:0,VAC:0};
+  var c={dY:0,dN:0,rY:0,rN:0,iY:0,iN:0,dP:0,rP:0,iP:0,dNV:0,rNV:0,iNV:0,P:0,NV:0,VAC:0};
   ids().forEach(function(id){var x=data[id],k=key(x);
     if(k==="Y"||k==="N")c[x.party.toLowerCase()+k]++;
-    else if(k==="P")c.P++;else if(k==="NV")c.NV++;else c.VAC++});
+    else if(k==="P"){c.P++;if(x.party)c[x.party.toLowerCase()+"P"]=(c[x.party.toLowerCase()+"P"]||0)+1}
+    else if(k==="NV"){c.NV++;if(x.party)c[x.party.toLowerCase()+"NV"]=(c[x.party.toLowerCase()+"NV"]||0)+1}
+    else c.VAC++});
   c.yes=c.dY+c.rY+c.iY;c.no=c.dN+c.rN+c.iN;return c;}
 function legendItems(c){
-  var L=[[HEX.dY,"Democratic YES"],[HEX.dN,"Democratic NO"],[HEX.rY,"Republican YES"],[HEX.rN,"Republican NO"]];
-  if(c.iY+c.iN)L.push([HEX.iY,"Independent YES"],[HEX.iN,"Independent NO"]);
+  var L=[[HEX.dY,"D Yes"],[HEX.dN,"D No"],[HEX.rY,"R Yes"],[HEX.rN,"R No"]];
+  if(c.iY+c.iN)L.push([HEX.iY,"I Yes"],[HEX.iN,"I No"]);
   L.push([HEX.P,"Present"],[HEX.VAC,"Not voting / vacant"]);return L;}
+function legendHTML(c){
+  var P=[["D","dY","dN"],["R","rY","rN"]];if(c.iY+c.iN)P.push(["I","iY","iN"]);
+  var h=P.map(function(p){return'<div><b class="ltr" style="background:'+HEX[p[1]]+'">'+p[0]+'</b><i class="sw" style="background:'+HEX[p[1]]+'"></i>Yes<i class="sw" style="background:'+HEX[p[2]]+';margin-left:8px"></i>No</div>'}).join("");
+  h+='<div><i class="sw" style="background:'+HEX.P+'"></i>Present<i class="sw" style="background:'+HEX.VAC+';margin-left:8px"></i>Not voting / vacant</div>';
+  return h;}
 function where(id,x){return CH==="senate"?id.split("-")[0]:(x&&x.guess?id.split("-")[0]+" (unknown)":id)}
 
 function build(){
@@ -142,9 +148,11 @@ function build(){
 function render(){
   var c=counts();
   document.querySelectorAll(".d").forEach(function(d){d.style.background=color(data[d.dataset.id])});
-  document.getElementById("tally").innerHTML=Site.tallyHTML(c);
-  document.getElementById("other").textContent="Present: "+c.P+"  ·  Not voting: "+c.NV+"  ·  Vacant: "+c.VAC;
-  document.getElementById("legend").innerHTML=legendItems(c).map(function(l){return'<span><i class="sw" style="background:'+l[0]+'"></i>'+l[1]+'</span>'}).join("");
+  var rp0=Site.resultPill(cur&&cur.result);
+  document.getElementById("ptab").innerHTML=Site.partyTable(c,rp0&&rp0.known?rp0.c==="y":null);
+  document.getElementById("tally").innerHTML=Site.tallyHTML(c,true);
+  document.getElementById("other").textContent=c.VAC?"Vacant: "+c.VAC:"";
+  document.getElementById("legend").innerHTML=legendHTML(c);
   lists();}
 
 function lists(){

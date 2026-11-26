@@ -15,6 +15,11 @@
   <div class="panel" style="margin-top:0"><h2>Senate</h2><div class="chart" id="ch-senate"></div><div class="lg" id="lg-senate"></div></div>
 </div>
 <div class="panel">
+  <h2>Bills signed into law</h2>
+  <div class="chart" id="ch-laws" style="max-width:760px"></div><div class="lg" id="lg-laws"></div>
+  <p class="small" id="laws-note"></p>
+</div>
+<div class="panel">
   <h2>Roll calls by Congress</h2>
   <div class="tblwrap"><table class="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
   <p class="small" id="note"></p>
@@ -34,6 +39,19 @@
     document.getElementById("lg-" + ch).innerHTML = S[ch].map(function (s) {
       return '<span><i style="background:' + s.color + '"></i>' + s.label + " (" + s.c.total + ")</span>";
     }).join("");
+  }
+  var LS = [];
+  await Promise.all(info.congresses.map(async function (x) {
+    try { var j = await Site.json("data/laws/" + x.congress + ".json"); LS.push({cg: x.congress, label: Site.ordinal(x.congress) + " Congress", c: Site.cumulative(j.laws, x.congress), live: x.congress === latest}); } catch (e) {}
+  }));
+  LS.sort(function (a, b) { return b.cg - a.cg; });
+  LS.forEach(function (s, i) { s.color = Site.COLORS[i % Site.COLORS.length]; s.bold = s.cg === latest; });
+  if (LS.length) {
+    Site.lineChart(document.getElementById("ch-laws"), LS, {w: 760, h: 300, label: "Laws signed by Congress"});
+    document.getElementById("lg-laws").innerHTML = LS.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + s.label + " (" + s.c.total + ")</span>"; }).join("");
+    document.getElementById("laws-note").textContent = "Cumulative public and private laws by day. The date is the bill\u2019s latest recorded action when it became law, which normally is the signing date.";
+  } else {
+    document.getElementById("laws-note").textContent = "Laws have not been collected yet. They are added by the next scheduled update.";
   }
   document.getElementById("th").innerHTML = "<tr><th>Congress</th><th>Years</th><th class=\"num\">House total</th><th class=\"num\">House by day " + today +
     "</th><th class=\"num\">Senate total</th><th class=\"num\">Senate by day " + today + "</th></tr>";

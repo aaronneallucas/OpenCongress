@@ -86,7 +86,8 @@
     host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Open Congress</a>' +
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
-      '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div></nav>';
+      '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div>' +
+      '<div class="tab' + (active === "data" ? " on" : "") + '"><button type="button" data-href="data.html">Data</button></div></nav>';
     host.querySelectorAll("[data-href]").forEach(function (b) { b.addEventListener("click", function () { location.href = b.dataset.href; }); });
     var tabs = host.querySelectorAll(".dd");
     function closeAll() {
@@ -115,14 +116,14 @@
   Site.voteTitle = function (j) {
     return "Roll Call " + j.roll + (j.bill ? " \u2014 " + Site.billLabel(j.bill) : (j.question ? " \u2014 " + j.question : ""));
   };
-  Site.tallyHTML = function (c) {
+  Site.tallyHTML = function (c, noPills) {
     var yes = c.yes != null ? c.yes : (c.dY || 0) + (c.rY || 0) + (c.iY || 0);
     var no = c.no != null ? c.no : (c.dN || 0) + (c.rN || 0) + (c.iN || 0);
     var tot = yes + no, segs;
     if ("dY" in c) segs = ["dY", "rY", "iY", "dN", "rN", "iN"].map(function (k) { return [c[k] || 0, Site.HEX[k]]; });
     else segs = [[yes, "#1e8e4e"], [no, "#c62828"]];
     var yp = tot ? (100 * yes / tot).toFixed(1) : "0.0", np = tot ? (100 - parseFloat(yp)).toFixed(1) : "0.0";
-    var h = '<div class="tw"><div class="pills"><span class="pill y">YES ' + yes + '</span><span class="pill n">NO ' + no + "</span></div>";
+    var h = '<div class="tw">' + (noPills ? "" : '<div class="pills"><span class="pill y">YES ' + yes + '</span><span class="pill n">NO ' + no + "</span></div>");
     if (tot) {
       h += '<div class="brk">' +
         (yes ? '<div style="flex:' + yes + '"><span class="cy">' + yp + "%</span></div>" : "") +
@@ -131,6 +132,21 @@
     h += '<div class="tbar">' + segs.map(function (s) {
       return s[0] ? '<i style="width:' + (s[0] / (tot || 1) * 100) + '%;background:' + s[1] + '"></i>' : "";
     }).join("") + "</div></div>";
+    return h;
+  };
+  /* Represent-style tally table: Yes / No / Present / Not voting by party, with a check or X by the deciding total. */
+  Site.partyTable = function (c, passed) {
+    var rows = [["Democratic", "d"], ["Republican", "r"]];
+    if ((c.iY || 0) + (c.iN || 0) + (c.iP || 0) + (c.iNV || 0)) rows.push(["Independent", "i"]);
+    var tot = {Y: 0, N: 0, P: 0, NV: 0};
+    var mark = function (k) { return passed === true && k === "Y" ? ' <span class="ck">&#10003;</span>' : passed === false && k === "N" ? ' <span class="xx">&#10007;</span>' : ""; };
+    var h = '<table class="pt"><thead><tr><th></th><th>Yes</th><th>No</th><th>Present</th><th>Not voting</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var v = {Y: c[r[1] + "Y"] || 0, N: c[r[1] + "N"] || 0, P: c[r[1] + "P"] || 0, NV: c[r[1] + "NV"] || 0};
+      Object.keys(v).forEach(function (k) { tot[k] += v[k]; });
+      h += "<tr><th>" + r[0] + "</th><td>" + v.Y + "</td><td>" + v.N + "</td><td>" + v.P + "</td><td>" + v.NV + "</td></tr>";
+    });
+    h += '<tr class="tt"><th>Total</th>' + ["Y", "N", "P", "NV"].map(function (k) { return "<td>" + tot[k] + mark(k) + "</td>"; }).join("") + "</tr></tbody></table>";
     return h;
   };
   /* Maverick points for one vote: party members with the majority minus party members against.

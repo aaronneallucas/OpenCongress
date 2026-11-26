@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Data — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+<style>.dlb{white-space:nowrap}.dlb a{margin-right:10px}.dlb a,.dlb button{font-size:13px}.src li{margin:5px 0}</style>
+</head>
+<body>
+<div id="nav"></div>
+<h1>Data</h1>
+<p class="sub">Everything on this site is built from the files below. Download them for your own use; they are refreshed by a scheduled update.</p>
+
+<div class="panel"><h2>Update status</h2>
+  <p id="status">Loading…</p>
+  <div class="tblwrap"><table class="tbl"><thead><tr><th>Congress</th><th>Chamber</th><th class="num">Votes saved</th><th>Latest vote</th><th class="num">Members</th><th class="num">With bills collected</th></tr></thead><tbody id="cov"></tbody></table></div>
+  <p class="small">A Congress still being backfilled shows fewer votes than it really had. “With bills collected” counts members whose sponsored and cosponsored totals are saved.</p>
+</div>
+
+<div class="panel"><h2>Downloads</h2>
+  <div class="tblwrap"><table class="tbl"><thead><tr><th>Congress</th><th>Chamber</th><th>Roll call votes</th><th>Members</th><th>Laws</th><th>Raw files</th></tr></thead><tbody id="dl"></tbody></table></div>
+  <p class="small">CSV files are generated in your browser from the saved JSON. The vote matrix is the grid behind the relationships map: one row per member, one character per roll call (y/n with the party, Y/N against it, a/b no party majority, p present, m not voting, - not on the roll call).</p>
+</div>
+
+<div class="panel src"><h2>Sources</h2>
+  <ul>
+    <li><a href="https://www.congress.gov/" target="_blank" rel="noopener">Congress.gov</a> and its <a href="https://api.congress.gov/" target="_blank" rel="noopener">API</a> (Library of Congress): House roll call votes, members, sponsored and cosponsored bills, and laws.</li>
+    <li><a href="https://www.senate.gov/legislative/votes.htm" target="_blank" rel="noopener">Senate.gov roll call votes</a>: Senate votes, published as XML.</li>
+  </ul>
+  <p class="small">Statistics (missed votes, votes against party, Maverick score, rankings) are calculated by this site from those records. The methods are described at the bottom of the Members pages.</p>
+</div>
+
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc;
+function csvCell(v){v=String(v==null?"":v);if(/^[=+\-@]/.test(v))v="'"+v;return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
+function csv(head,rows){return"﻿"+[head].concat(rows).map(function(r){return r.map(csvCell).join(",")}).join("\r\n")+"\r\n"}
+function save(name,text){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/csv;charset=utf-8"}));a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500)}
+var DIR=null;
+window.dlVotes=async function(ch,cg){var idx=await Site.json("data/"+ch+"/"+cg+"/index.json");
+  save(ch+"-"+cg+"-votes.csv",csv(["Session","Roll","Date","Bill","Question","Result","Dem Yes","Dem No","Rep Yes","Rep No","Ind Yes","Ind No"],
+    idx.map(function(v){return[v.session,v.roll,v.date,v.bill,v.question,v.result,v.dY,v.dN,v.rY,v.rN,v.iY,v.iN]})))};
+window.dlMembers=function(ch,cg){
+  save(ch+"-"+cg+"-members.csv",csv(["Member ID","Last","First","Party","State","District","Votes","Missed","Present","Against party","Party votes","Maverick score","Sponsored","Cosponsored"],
+    DIR.filter(function(e){var s=e.c&&e.c[cg];return s&&s.chamber===ch}).map(function(e){var s=e.c[cg];
+      return[e.id,e.last,e.first,s.party,s.state,s.district,s.eligible,s.missed,s.present,s.against,s.partyVotes,s.maverick,s.sponsored,s.cosponsored]})))};
+window.dlLaws=async function(cg){var j=await Site.json("data/laws/"+cg+".json");
+  save("laws-"+cg+".csv",csv(["Law","Kind","Bill type","Bill number","Title","Date"],j.laws.map(function(l){return[l.law,l.kind,l.type,l.number,l.title,l.date]})))};
+(async function(){
+  Site.nav("data");
+  var info=await Site.congresses();
+  try{DIR=await Site.json("data/members/directory.json")}catch(e){DIR=[]}
+  try{var st=await Site.json("data/status.json");
+    document.getElementById("status").innerHTML="Last update finished <b>"+esc(new Date(st.updated).toLocaleString())+"</b>, tracking Congress"+(st.congresses.length>1?"es ":" ")+st.congresses.join(", ")+" ("+st.requests+" API requests in that run). Updates run automatically about every six hours."}
+  catch(e){document.getElementById("status").textContent="No update status yet. It appears after the next update that includes the latest version of the update script."}
+  if(!info){document.getElementById("cov").innerHTML="<tr><td colspan=6>No data yet.</td></tr>";return}
+  var cov="",dl="";
+  for(var x of info.congresses){
+    var hasLaws=true;try{await Site.json("data/laws/"+x.congress+".json")}catch(e){hasLaws=false}
+    for(var ch of x.chambers){
+      var idx=[];try{idx=await Site.json("data/"+ch+"/"+x.congress+"/index.json")}catch(e){}
+      var mem=DIR.filter(function(e){var s=e.c&&e.c[x.congress];return s&&s.chamber===ch&&s.eligible>0});
+      var withB=mem.filter(function(e){return e.c[x.congress].sponsored!=null}).length;
+      var last=idx.reduce(function(m,v){return v.date&&v.date>m?v.date:m},"");
+      cov+="<tr><td>"+Site.ordinal(x.congress)+"</td><td>"+Site.chamberName(ch)+'</td><td class="num">'+idx.length+"</td><td>"+(last?Site.fmtDate(last):"—")+'</td><td class="num">'+mem.length+'</td><td class="num">'+withB+"</td></tr>";
+      dl+="<tr><td>"+Site.ordinal(x.congress)+"</td><td>"+Site.chamberName(ch)+'</td><td class="dlb"><button onclick="dlVotes(\''+ch+"',"+x.congress+')">CSV</button></td>'+
+        '<td class="dlb"><button onclick="dlMembers(\''+ch+"',"+x.congress+')">CSV</button></td>'+
+        '<td class="dlb">'+(ch==="house"&&hasLaws?'<button onclick="dlLaws('+x.congress+')">CSV</button>':ch==="house"?"—":"")+"</td>"+
+        '<td class="dlb"><a href="data/'+ch+"/"+x.congress+'/index.json">index.json</a><a href="data/'+ch+"/"+x.congress+'/matrix.json">matrix.json</a>'+(ch==="house"&&hasLaws?'<a href="data/laws/'+x.congress+'.json">laws.json</a>':"")+"</td></tr>";
+    }
+  }
+  document.getElementById("cov").innerHTML=cov;document.getElementById("dl").innerHTML=dl;
+})();
+</script>
+</body>
+</html>

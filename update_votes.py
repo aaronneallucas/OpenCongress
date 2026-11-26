@@ -67,6 +67,9 @@ STEP = {"n": 0, "of": 0}
 SUMMARY = []
 
 
+LAW_RE = re.compile(r"Became (Public|Private) Law No: ?([0-9]+-[0-9]+)", re.I)
+
+
 def log(*a):
     print(*a, flush=True)
 
@@ -705,9 +708,15 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
                     cg = x.get("congress")
                     if cg in cgs:
                         slot = data["congresses"].setdefault(str(cg), {"sponsored": [], "cosponsored": []})
-                        slot[kind].append({"type": x.get("type"), "number": str(x.get("number")),
-                                           "title": (x.get("title") or "")[:300],
-                                           "date": x.get("introducedDate")})
+                        item = {"type": x.get("type"), "number": str(x.get("number")),
+                                "title": (x.get("title") or "")[:300],
+                                "date": x.get("introducedDate")}
+                        la = x.get("latestAction") or {}
+                        lm = LAW_RE.search(la.get("text") or "")
+                        if lm:
+                            item["law"] = lm.group(2)
+                            item["lawDate"] = la.get("actionDate")
+                        slot[kind].append(item)
         except Exception as ex:
             log("  legislation failed for", e["id"], ex)
             continue
@@ -720,6 +729,55 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
             log("  Legislation progress: %d of %d member(s) refreshed | %d sponsored and %d cosponsored bills read | %d of %d requests used | elapsed %s"
                 % (done, len(todo), tot["sponsored"], tot["cosponsored"], REQS - start, budget, elapsed()))
     note("Legislation: refreshed sponsored and cosponsored bills for %d member(s) using %d requests (%d sponsored and %d cosponsored bills read)" % (done, REQS - start, tot["sponsored"], tot["cosponsored"]))
+
+
+def apply_counts(dirmap, cgs):
+    """Copy sponsored / cosponsored totals from each member's legislation file into the directory."""
+    n = 0
+    for e in dirmap.values():
+        d = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
+        if not d:
+            continue
+        for cg in cgs:
+            c = e["c"].get(str(cg))
+            slot = d.get("congresses", {}).get(str(cg))
+            if c is None:
+                continue
+            c["sponsored"] = len(slot["sponsored"]) if slot else 0
+            c["cosponsored"] = len(slot["cosponsored"]) if slot else 0
+            n += 1
+    log("Legislation counts saved for %d member/Congress pair(s)." % n)
+
+
+# ---------------------------------------------------------------- bills signed into law
+def update_laws(cgs):
+    """data/laws/{cg}.json: every public and private law of the Congress, from the Congress.gov law endpoint."""
+    for cg in cgs:
+        laws = []
+        for kind in ("pub", "priv"):
+            try:
+                items, _ = paged("/law/%d/%s" % (cg, kind), lambda j: find_list(j, "bills"),
+                                 lambda x: (x.get("type"), x.get("number")), max_pages=30, quiet=True)
+            except Exception as ex:
+                log("  laws (%s) for Congress %d failed: %s" % (kind, cg, ex))
+                continue
+            for x in items:
+                nums = [l.get("number") for l in (x.get("laws") or []) if l.get("number")]
+                la = x.get("latestAction") or {}
+                laws.append({"law": nums[0] if nums else "", "kind": kind, "type": x.get("type"),
+                             "number": str(x.get("number")), "title": (x.get("title") or "")[:300],
+                             "date": la.get("actionDate") or (x.get("updateDate") or "")[:10]})
+        if laws:
+            laws.sort(key=lambda l: (l["date"] or "", l["law"]))
+            save_json(os.path.join(OUT, "laws", "%d.json" % cg), {"updated": datetime.date.today().isoformat(), "congress": cg, "laws": laws})
+        note("Laws: Congress %d has %d public/private law(s) recorded" % (cg, len(laws)))
+
+
+def write_status(cgs):
+    save_json(os.path.join(OUT, "status.json"), {
+        "updated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "congresses": cgs, "requests": REQS, "summary": SUMMARY})
+
 
 
 # ---------------------------------------------------------------- main
@@ -741,6 +799,8 @@ def main():
     plan.append("Save the member directory and the list of Congresses")
     plan.append("Sponsored and cosponsored bills for members (up to %d requests)" % leg_budget if leg_budget > 0 else
                 "Sponsored and cosponsored bills (skipped: LEG_BUDGET is 0)")
+    plan.append("Bills signed into law (public and private laws) for each Congress")
+    plan.append("Save sponsored/cosponsored counts and the data status")
     STEP["of"] = len(plan)
     log("Congresses to update: " + ", ".join(str(c) for c in cgs))
     log("Tasks this run:")
@@ -761,6 +821,12 @@ def main():
     log("Saved %d member(s)." % len(dirmap))
     step("Sponsored and cosponsored bills")
     update_legislation(dirmap, cgs, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    step("Bills signed into law")
+    update_laws(cgs)
+    step("Saving legislation counts and status")
+    apply_counts(dirmap, cgs)
+    save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))
+    write_status(cgs)
     log("")
     log("===== Summary (elapsed %s, %d API requests) =====" % (elapsed(), REQS))
     for line in SUMMARY:
