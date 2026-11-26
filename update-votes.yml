@@ -12,7 +12,7 @@ on:
         description: "Max API requests for sponsored/cosponsored bills (0 skips them)"
         default: "150"
       congresses:
-        description: "Congresses to update, comma separated (blank = previous and current)"
+        description: "Congresses to update, comma separated (blank = the current Congress, plus the previous one for 21 days after a new Congress begins)"
         default: ""
 
 permissions:

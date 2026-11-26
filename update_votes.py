@@ -17,7 +17,7 @@ Layout (all under OUT_DIR, default "data"):
 
 Environment variables:
   CONGRESS_API_KEY   (required)
-  CONGRESSES         e.g. "118,119". Default: the previous and the current Congress.
+  CONGRESSES         e.g. "118,119". Default: the current Congress, plus the previous one until 21 days after the new Congress begins.
   MAX_NEW            max new votes saved per chamber and Congress per run (default 400)
   LEG_BUDGET         max API requests spent on bills per run (default 1200)
   LEG_REFRESH_DAYS   re-fetch a member's bills after this many days (default 5)
@@ -780,12 +780,20 @@ def write_status(cgs):
 
 
 
+def default_congresses(today=None, grace_days=21):
+    """The current Congress, plus the previous one only until grace_days after the new Congress begins (Jan 3)."""
+    today = today or datetime.date.today()
+    cur = current_congress(today)
+    start = datetime.date(1789 + 2 * (cur - 1), 1, 3)
+    return [cur - 1, cur] if (today - start).days < grace_days else [cur]
+
+
 # ---------------------------------------------------------------- main
 def main():
     migrate_legacy()
     env = os.environ.get("CONGRESSES", "").strip()
     cur = current_congress()
-    cgs = sorted(int(x) for x in env.split(",") if x.strip()) if env else [cur - 1, cur]
+    cgs = sorted(int(x) for x in env.split(",") if x.strip()) if env else default_congresses()
     max_new = int(os.environ.get("MAX_NEW", "400"))
     leg_budget = int(os.environ.get("LEG_BUDGET", "1200"))
     dpath = os.path.join(OUT, "members", "directory.json")
