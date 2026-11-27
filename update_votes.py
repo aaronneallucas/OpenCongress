@@ -780,7 +780,7 @@ def build_bills(dirmap, cgs):
     """data/billlist/{cg}/: every bill any tracked member sponsored, with cosponsor counts by party.
     recent.json (newest 400), {TYPE}-{k}.json chunks of 2000 bill numbers, and meta.json."""
     for cg in cgs:
-        bills, cos = {}, {}
+        bills, cos, cosids = {}, {}, {}
         for e in dirmap.values():
             c = e["c"].get(str(cg))
             if c is None:
@@ -803,6 +803,7 @@ def build_bills(dirmap, cgs):
                 key = (x.get("type") or "") + " " + str(x.get("number"))
                 cc = cos.setdefault(key, [0, 0, 0])
                 cc[{"D": 0, "R": 1}.get(p, 2)] += 1
+                cosids.setdefault(key, []).append([e["id"], x.get("date") or ""])
         for key, cc in cos.items():
             r = bills.get(key)
             if r:
@@ -818,6 +819,9 @@ def build_bills(dirmap, cgs):
         for (ty, k), rows in groups.items():
             rows.sort(key=lambda r: r["n"])
             save_json(os.path.join(base, "%s-%d.json" % (ty, k)), rows)
+            cmap = {str(r["n"]): cosids[r["y"] + " " + str(r["n"])] for r in rows if (r["y"] + " " + str(r["n"])) in cosids}
+            if cmap:
+                save_json(os.path.join(base, "cos-%s-%d.json" % (ty, k)), cmap)
             chunks.setdefault(ty, []).append(k)
         recent = sorted(bills.values(), key=lambda r: (r["d"], r["n"]), reverse=True)[:400]
         save_json(os.path.join(base, "recent.json"), recent)

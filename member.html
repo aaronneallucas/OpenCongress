@@ -91,7 +91,8 @@ function drawBills(kind,listId,headId){
   h.textContent=items.length+" "+kind+" bill"+(items.length===1?"":"s")+" in the "+Site.ordinal(CG)+" Congress (updated "+Site.fmtDate(LEG.updated)+").";
   ul.innerHTML=items.map(function(b){
     var url=Site.billUrl(b.type,b.number,CG),label=(b.type||"")+" "+b.number;
-    return"<li>"+(url?'<a class="bn" href="'+url+'" target="_blank" rel="noopener">'+esc(label)+"</a>":'<span class="bn">'+esc(label)+"</span>")+esc(b.title)+(b.law?' <span class="law" title="Signed into law'+(b.lawDate?" "+esc(b.lawDate):"")+'">Law '+esc(b.law)+"</span>":"")+' <span class="bd">'+esc(Site.fmtDate(b.date))+"</span></li>"}).join("");}
+    var page="bill.html?congress="+CG+"&type="+encodeURIComponent(b.type||"")+"&number="+encodeURIComponent(b.number);
+    return'<li><a class="bn" href="'+page+'">'+esc(Site.billLabel(label))+"</a>"+esc(b.title)+(url?' <a class="bd" href="'+url+'" target="_blank" rel="noopener" title="Open on Congress.gov">Congress.gov &#8599;</a>':"")+(b.law?' <span class="law" title="Signed into law'+(b.lawDate?" "+esc(b.lawDate):"")+'">Law '+esc(b.law)+"</span>":"")+' <span class="bd">'+esc(Site.fmtDate(b.date))+"</span></li>"}).join("");}
 
 function showTab(t){
   document.querySelectorAll("#ptabs button").forEach(function(b){b.classList.toggle("on",b.dataset.t===t)});

@@ -13,7 +13,11 @@
 <p id="title" style="font-size:17px;max-width:900px"></p>
 <div class="cards" id="cards"></div>
 <p class="small" id="links"></p>
-<div class="panel"><h2>Roll call votes on this bill</h2><div id="votes"></div></div>
+<div class="panel" id="tickp" style="display:none"><h2>Cosponsors by party</h2><div id="ticks" style="line-height:0"></div><p class="small" id="tickn"></p></div>
+<div class="panel" id="chp" style="display:none"><h2>Cosponsors over time</h2><div class="chart" id="cch" style="max-width:760px"></div><div class="lg" id="clg"></div><p class="small">Dates are when each member signed on, so the first step is the bill’s original cosponsors. The horizontal axis spans the two years of the Congress.</p></div>
+<div class="chips" id="btabs"><button data-t="votes" class="on">Roll call votes</button><button data-t="cos">Cosponsors</button></div>
+<div class="panel" id="p-votes"><div id="votes"></div></div>
+<div class="panel" id="p-cos" style="display:none"><div id="cosl"></div></div>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
@@ -40,6 +44,24 @@ function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><di
     cards.push(card("Cosponsors",String(tot),tot?esc([rec.cd?rec.cd+" Democratic":"",rec.cr?rec.cr+" Republican":"",rec.ci?rec.ci+" other":""].filter(Boolean).join(" · "))+((rec.cd&&rec.cr)?" · <b>bipartisan</b>":""):"None collected"))}
   cards.push(card("Signed into law",lw?'<span class="law" style="font-size:15px">Law '+esc(lw)+"</span>":"No",lw&&(rec&&rec.ld||law&&law.date)?esc(Site.fmtDate((rec&&rec.ld)||law.date)):"Not recorded as enacted"));
   document.getElementById("cards").innerHTML=cards.join("");
+  var D=rec?rec.cd||0:0,R=rec?rec.cr||0:0,O=rec?rec.ci||0:0;
+  if(D+R+O){document.getElementById("tickp").style.display="";
+    var tk=function(c,k){var s="";for(var i=0;i<k;i++)s+='<span style="display:inline-block;width:3px;height:22px;margin:2px 1px;background:'+c+'"></span>';return s};
+    document.getElementById("ticks").innerHTML=tk(Site.HEX.dY,D)+tk("#8a8a8a",O)+tk(Site.HEX.rY,R);
+    document.getElementById("tickn").textContent="Each tick is one cosponsor: "+D+" Democratic (blue), "+R+" Republican (red)"+(O?", "+O+" other (gray)":"")+"."}
+  document.querySelectorAll("#btabs button").forEach(function(x){x.onclick=function(){document.querySelectorAll("#btabs button").forEach(function(y){y.classList.toggle("on",y===x)});
+    document.getElementById("p-votes").style.display=x.dataset.t==="votes"?"":"none";document.getElementById("p-cos").style.display=x.dataset.t==="cos"?"":"none"}});
+  var cosIds=[];
+  if(meta&&rec){try{var cm=await Site.json("data/billlist/"+CG+"/cos-"+ty+"-"+Math.floor((n-1)/(meta.chunk||2000))+".json");cosIds=cm[String(n)]||[]}catch(e){}}
+  var cr=cosIds.map(function(x){var id=Array.isArray(x)?x[0]:x,e=DIR[id];return e?{id:id,e:e,c:(e.c&&e.c[CG])||{},date:Array.isArray(x)?x[1]:""}:null}).filter(Boolean).sort(function(a,b){return(a.date||"9")<(b.date||"9")?-1:(a.date||"9")>(b.date||"9")?1:(a.e.last||"")<(b.e.last||"")?-1:1});
+  var dated=cr.filter(function(x){return x.date});
+  if(dated.length>1){document.getElementById("chp").style.display="";
+    var pcd=function(x){return x.c.party==="D"?"D":x.c.party==="R"?"R":"I"};
+    var S=[["All cosponsors","#222",dated],["Democratic",Site.HEX.dY,dated.filter(function(x){return pcd(x)==="D"})],["Republican",Site.HEX.rY,dated.filter(function(x){return pcd(x)==="R"})]].filter(function(s){return s[2].length}).map(function(s,i){return{label:s[0],color:s[1],bold:i===0,c:Site.cumulative(s[2],CG)}});
+    Site.lineChart(document.getElementById("cch"),S,{w:760,h:280,label:"Cosponsors over time"});
+    document.getElementById("clg").innerHTML=S.map(function(s){return'<span><i style="background:'+s.color+'"></i>'+s.label+" ("+s.c.total+")</span>"}).join("")}
+  document.querySelector('#btabs [data-t="cos"]').textContent="Cosponsors ("+(rec?D+R+O:0)+")";
+  document.getElementById("cosl").innerHTML=cr.length?'<div class="tblwrap"><table class="tbl"><thead><tr><th>Member</th><th>Party</th><th>State</th><th>Date cosponsored</th></tr></thead><tbody>'+cr.map(function(x){return'<tr><td><a href="'+Site.memberHref(x.id,CG)+'">'+esc(x.e.first+" "+x.e.last)+'</a></td><td>'+esc(x.c.party||"")+"</td><td>"+esc((x.c.state||"")+(x.c.district?"-"+x.c.district:""))+"</td><td>"+(x.date?esc(Site.fmtDate(x.date)):"\u2014")+"</td></tr>"}).join("")+"</tbody></table></div>":'<p class="small">No cosponsors collected for this bill.</p>';
   var url=Site.billUrl(ty,n,CG);
   document.getElementById("links").innerHTML=url?'<a href="'+url+'" target="_blank" rel="noopener">View '+esc(label)+" on Congress.gov</a>":"";
   var votes=[];r[3].forEach(function(v){if(v.bill===key)votes.push(v)});r[4].forEach(function(v){if(v.bill===key)votes.push(v)});

@@ -15,6 +15,10 @@
   <span id="views"></span>
   <input id="find" type="search" placeholder="Search all collected bills by title or number" style="flex:1 1 260px;max-width:420px;width:auto">
 </div>
+<form class="chips" id="goform" style="align-items:center"><b style="font-size:14px">Go to a bill number:</b>
+  <select id="gt"><option value="HR">H.R.</option><option value="S">S.</option><option value="HRES">H.Res.</option><option value="SRES">S.Res.</option><option value="HJRES">H.J.Res.</option><option value="SJRES">S.J.Res.</option><option value="HCONRES">H.Con.Res.</option><option value="SCONRES">S.Con.Res.</option></select>
+  <input id="gn" type="number" min="1" step="1" placeholder="Number" style="width:110px" required><button type="submit">Go</button>
+</form>
 <p class="small" id="count"></p>
 <div id="list"></div>
 <button id="more" style="display:none;margin:12px 0">Show more</button>
@@ -23,7 +27,9 @@
 <script src="site.js"></script>
 <script>
 var esc=Site.esc,CG=119,VIEW="recent",SHOW=40,ALL=null,META=null,TB={},DIR={},VIDX=[],LAWS=[],RECENT=[];
-var VIEWS=[["recent","Recently introduced"],["voted","Voted on"],["law","Signed into law"]];
+var VIEWS=[["recent","Recently introduced"],["most","Most cosponsors"],["voted","Voted on"],["law","Signed into law"]];
+var TYPES={HR:1,S:1,HRES:1,SRES:1,HJRES:1,SJRES:1,HCONRES:1,SCONRES:1};
+function csTot(r){return(r.cd||0)+(r.cr||0)+(r.ci||0)}
 function pc(p){return p==="D"||p==="R"?p:"I"}
 function row(r){
   var label=Site.billLabel(r.y+" "+r.n),href="bill.html?congress="+CG+"&type="+encodeURIComponent(r.y)+"&number="+r.n;
@@ -31,7 +37,7 @@ function row(r){
   if(r.d)m.push((r.kind==="vote"?"Last vote ":r.kind==="law"?"Signed ":"Introduced ")+Site.fmtDate(r.d));
   if(r.s&&DIR[r.s])m.push("Sponsor: "+esc(DIR[r.s].first+" "+DIR[r.s].last)+" ("+r.sp+")");
   var cs=[];if(r.cd)cs.push(r.cd+" D");if(r.cr)cs.push(r.cr+" R");if(r.ci)cs.push(r.ci+" other");
-  if(cs.length)m.push("Cosponsors: "+cs.join(", "));
+  if(cs.length)m.push("Cosponsors: "+csTot(r)+" ("+cs.join(", ")+")");
   if(r.votes)m.push(r.votes+" roll call vote"+(r.votes>1?"s":""));
   var law=r.l?' <span class="law">Law '+esc(r.l)+"</span>":"";
   var title=r.t||TB[r.y+" "+r.n]||"";
@@ -41,10 +47,13 @@ function current(){
   var q=document.getElementById("find").value.toLowerCase().trim();
   if(q){
     if(!ALL)return null;
+    var ex=q.toUpperCase().replace(/[.\s]/g,"").match(/^([A-Z]+)(\d+)$/);
+    if(ex&&TYPES[ex[1]]){var xt=ex[1],xn=parseInt(ex[2],10);return ALL.filter(function(r){return r.y===xt&&r.n===xn})}
     var toks=q.split(/\s+/);
     return ALL.filter(function(r){var h=(Site.billLabel(r.y+" "+r.n)+" "+r.y+" "+r.n+" "+r.t).toLowerCase();return toks.every(function(t){return h.indexOf(t)>-1})}).sort(function(a,b){return(b.d||"")<(a.d||"")?-1:1});
   }
   if(VIEW==="recent")return RECENT;
+  if(VIEW==="most"){if(!ALL)return null;return ALL.filter(function(r){return csTot(r)>0}).sort(function(a,b){return csTot(b)-csTot(a)||((b.d||"")<(a.d||"")?-1:1)})}
   if(VIEW==="law")return LAWS;
   var by={};
   VIDX.forEach(function(v){if(!v.bill)return;var m=v.bill.match(/^([A-Za-z]+)\s*(\d+)$/);if(!m)return;var k=m[1].toUpperCase()+" "+m[2];
@@ -61,13 +70,14 @@ function draw(){
   var rows=current(),L=document.getElementById("list");
   if(rows===null){document.getElementById("count").textContent="Loading…";return}
   var q=document.getElementById("find").value.trim();
+  if(!q&&VIEW==="most"&&rows.length&&!rows[0].rank){rows.forEach(function(r,i){r.rank=i+1})}
   document.getElementById("count").textContent=q?rows.length+" bill"+(rows.length===1?"":"s")+" match":rows.length+" bill"+(rows.length===1?"":"s")+" in this view";
   L.innerHTML=rows.slice(0,SHOW).map(row).join("")||'<p class="small">Nothing here yet.</p>';
   document.getElementById("more").style.display=rows.length>SHOW?"":"none";
 }
 function views(){
   document.getElementById("views").innerHTML=VIEWS.map(function(v){return'<button data-v="'+v[0]+'"'+(v[0]===VIEW?' class="on"':'')+'>'+v[1]+'</button>'}).join("");
-  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;SHOW=40;document.getElementById("find").value="";views();draw()}});
+  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;SHOW=40;document.getElementById("find").value="";views();if(VIEW==="most"&&!ALL){draw();loadAll().then(draw)}else draw()}});
 }
 async function load(){
   document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress. Bills are gathered from members’ sponsored and cosponsored lists, so a new bill can take a few days to appear.";
@@ -97,6 +107,7 @@ async function load(){
   views();
   document.getElementById("find").oninput=async function(){SHOW=40;if(this.value.trim()&&!ALL)await loadAll();draw()};
   document.getElementById("more").onclick=function(){SHOW+=40;draw()};
+  document.getElementById("goform").onsubmit=function(e){e.preventDefault();var n=parseInt(document.getElementById("gn").value,10);if(n>0)location.href="bill.html?congress="+CG+"&type="+document.getElementById("gt").value+"&number="+n};
   load();
 })();
 </script>
