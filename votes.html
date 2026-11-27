@@ -11,13 +11,14 @@
 <h1 id="h">Roll Call Votes</h1>
 <p class="sub" id="sub"></p>
 <input id="find" type="search" placeholder="Search by bill, topic, or roll number" style="margin-bottom:14px">
+<div id="pg1"></div>
 <div id="list"></div>
-<button id="more">Show more</button>
+<div id="pg2"></div>
 <p class="foot" id="msg"></p>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var IDX = [], shown = 40, CH = "house", CG = 119, busy = {};
+var IDX = [], SIZE = 50, LO = 1, HI = 1, CH = "house", CG = 119, busy = {};
 var HEX = Site.HEX, esc = Site.esc;
 
 function vk(v) { return v.session + "-" + v.roll; }
@@ -65,7 +66,10 @@ function draw() {
   var f = IDX.filter(function (v) {
     return !q || [v.bill, v.question, v.title, v.result, "roll " + v.roll, v.roll, Site.fmtDate(v.date)].join(" ").toLowerCase().indexOf(q) > -1;
   });
-  document.getElementById("list").innerHTML = f.slice(0, shown).map(function (v) {
+  var pages = Math.max(1, Math.ceil(f.length / SIZE));
+  if (LO > pages) LO = pages; if (HI > pages) HI = pages; if (HI < LO) HI = LO;
+  var vis = f.slice((LO - 1) * SIZE, HI * SIZE);
+  document.getElementById("list").innerHTML = vis.map(function (v) {
     var other = ("present" in v) ? "Present " + v.present + " · Not voting " + v.notVoting : "";
     return '<a class="row" data-k="' + vk(v) + '" href="' + Site.voteHref(CH, CG, v.session, v.roll) + '">' +
       '<div class="t">' + (v.bill ? "<b>" + esc(v.bill) + "</b> · " : "") + esc(v.question || "Roll call") + "</div>" +
@@ -75,12 +79,14 @@ function draw() {
       '<div class="bw"><span class="bs">' + bar(v) + '</span><div class="c"><span class="y">YES ' + v.yes + '</span><span class="n">NO ' + v.no + "</span></div></div>" +
       '<div class="x">' + other + "</div></a>";
   }).join("");
-  document.getElementById("more").style.display = f.length > shown ? "block" : "none";
+  Site.pager([document.getElementById("pg1"), document.getElementById("pg2")], {total: f.length, size: SIZE, lo: LO, hi: HI,
+    onPage: function (n) { LO = HI = n; draw(); window.scrollTo(0, document.getElementById("pg1").getBoundingClientRect().top + window.pageYOffset - 70); },
+    onMore: function () { HI++; draw(); },
+    onSize: function (n) { SIZE = n; LO = HI = 1; draw(); }});
   document.getElementById("msg").textContent = f.length ? "" : (IDX.length ? "No votes match your search." : "");
-  f.slice(0, shown).forEach(function (v, i) { setTimeout(function () { enrich(v); }, i * 60); });
+  vis.forEach(function (v, i) { setTimeout(function () { enrich(v); }, i * 60); });
 }
-document.getElementById("find").oninput = function () { shown = 40; draw(); };
-document.getElementById("more").onclick = function () { shown += 40; draw(); };
+document.getElementById("find").oninput = function () { LO = HI = 1; draw(); };
 
 (async function () {
   Site.nav("votes");

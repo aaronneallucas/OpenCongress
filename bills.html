@@ -15,20 +15,25 @@
   <span id="views"></span>
   <input id="find" type="search" placeholder="Search all collected bills by title or number" style="flex:1 1 260px;max-width:420px;width:auto">
 </div>
+<div class="chips" id="pfx" style="align-items:center"></div>
 <form class="chips" id="goform" style="align-items:center"><b style="font-size:14px">Go to a bill number:</b>
   <select id="gt"><option value="HR">H.R.</option><option value="S">S.</option><option value="HRES">H.Res.</option><option value="SRES">S.Res.</option><option value="HJRES">H.J.Res.</option><option value="SJRES">S.J.Res.</option><option value="HCONRES">H.Con.Res.</option><option value="SCONRES">S.Con.Res.</option></select>
   <input id="gn" type="number" min="1" step="1" placeholder="Number" style="width:110px" required><button type="submit">Go</button>
 </form>
 <p class="small" id="count"></p>
+<div id="pg1"></div>
 <div id="list"></div>
-<button id="more" style="display:none;margin:12px 0">Show more</button>
+<div id="pg2"></div>
 <p class="small" id="cov"></p>
 <p class="foot">Data: Congress.gov</p>
 <script src="site.js"></script>
 <script>
-var esc=Site.esc,CG=119,VIEW="recent",SHOW=40,ALL=null,META=null,TB={},DIR={},VIDX=[],LAWS=[],RECENT=[];
+var esc=Site.esc,CG=119,VIEW="recent",SIZE=50,LO=1,HI=1,PFX="",CHM="",ALL=null,META=null,TB={},DIR={},VIDX=[],LAWS=[],RECENT=[];
 var VIEWS=[["recent","Recently introduced"],["most","Most cosponsors"],["voted","Voted on"],["law","Signed into law"]];
 var TYPES={HR:1,S:1,HRES:1,SRES:1,HJRES:1,SJRES:1,HCONRES:1,SCONRES:1};
+var PFXS=[["HR","H.R."],["S","S."],["HRES","H.Res."],["SRES","S.Res."],["HJRES","H.J.Res."],["SJRES","S.J.Res."],["HCONRES","H.Con.Res."],["SCONRES","S.Con.Res."]];
+function pass(r){return(!PFX||r.y===PFX)&&(!CHM||String(r.y).charAt(0)===CHM)}
+function filtering(){return!!(PFX||CHM)}
 function csTot(r){return(r.cd||0)+(r.cr||0)+(r.ci||0)}
 function pc(p){return p==="D"||p==="R"?p:"I"}
 function row(r){
@@ -41,9 +46,10 @@ function row(r){
   if(r.votes)m.push(r.votes+" roll call vote"+(r.votes>1?"s":""));
   var law=r.l?' <span class="law">Law '+esc(r.l)+"</span>":"";
   var title=r.t||TB[r.y+" "+r.n]||"";
-  return'<a class="row" href="'+href+'"><div class="t"><b>'+esc(label)+"</b>"+law+"</div>"+(title?'<div class="tt">'+esc(Site.clip(title,260))+"</div>":"")+'<div class="m">'+m.map(function(x){return x.indexOf("Sponsor")===0?x:esc(x)}).join(" · ")+"</div></a>";
+  return'<a class="row" href="'+href+'"><div class="t"><b>'+esc(label)+"</b>"+law+"</div>"+(title?'<div class="tt">'+esc(Site.clip(title,260))+"</div>":"")+(r.m?'<div class="tt" style="color:var(--muted);font-size:13px">'+esc(Site.clip(r.m,200))+"</div>":"")+'<div class="m">'+m.map(function(x){return x.indexOf("Sponsor")===0?x:esc(x)}).join(" · ")+"</div></a>";
 }
-function current(){
+function current(){var rows=current0();return rows&&filtering()?rows.filter(pass):rows}
+function current0(){
   var q=document.getElementById("find").value.toLowerCase().trim();
   if(q){
     if(!ALL)return null;
@@ -52,7 +58,11 @@ function current(){
     var toks=q.split(/\s+/);
     return ALL.filter(function(r){var h=(Site.billLabel(r.y+" "+r.n)+" "+r.y+" "+r.n+" "+r.t).toLowerCase();return toks.every(function(t){return h.indexOf(t)>-1})}).sort(function(a,b){return(b.d||"")<(a.d||"")?-1:1});
   }
-  if(VIEW==="recent")return RECENT;
+  if(VIEW==="recent"){
+    if(!filtering())return RECENT;
+    if(!ALL)return null;
+    return ALL.slice().sort(function(a,b){return(b.d||"")<(a.d||"")?-1:(b.d||"")>(a.d||"")?1:b.n-a.n});
+  }
   if(VIEW==="most"){if(!ALL)return null;return ALL.filter(function(r){return csTot(r)>0}).sort(function(a,b){return csTot(b)-csTot(a)||((b.d||"")<(a.d||"")?-1:1)})}
   if(VIEW==="law")return LAWS;
   var by={};
@@ -66,18 +76,31 @@ async function loadAll(){
   var jobs=[];Object.keys(META.chunks).forEach(function(ty){META.chunks[ty].forEach(function(k){jobs.push(Site.json("data/billlist/"+CG+"/"+ty+"-"+k+".json").catch(function(){return[]}))})});
   var parts=await Promise.all(jobs);ALL=[].concat.apply([],parts);
 }
+function ensureAll(){return filtering()&&VIEW==="recent"&&!ALL?loadAll().then(draw):null}
+function go(lo,hi){LO=lo;HI=hi;draw();window.scrollTo(0,document.getElementById("pg1").getBoundingClientRect().top+window.pageYOffset-70)}
 function draw(){
   var rows=current(),L=document.getElementById("list");
-  if(rows===null){document.getElementById("count").textContent="Loading…";return}
+  if(rows===null){document.getElementById("count").textContent="Loading all collected bills…";return}
   var q=document.getElementById("find").value.trim();
   if(!q&&VIEW==="most"&&rows.length&&!rows[0].rank){rows.forEach(function(r,i){r.rank=i+1})}
-  document.getElementById("count").textContent=q?rows.length+" bill"+(rows.length===1?"":"s")+" match":rows.length+" bill"+(rows.length===1?"":"s")+" in this view";
-  L.innerHTML=rows.slice(0,SHOW).map(row).join("")||'<p class="small">Nothing here yet.</p>';
-  document.getElementById("more").style.display=rows.length>SHOW?"":"none";
+  var pages=Math.max(1,Math.ceil(rows.length/SIZE));if(LO>pages)LO=pages;if(HI>pages)HI=pages;if(HI<LO)HI=LO;
+  var pf=filtering()?" matching the filters":"";
+  document.getElementById("count").textContent=q?rows.length+" bill"+(rows.length===1?"":"s")+" match"+(filtering()?" the filters too":""):rows.length+" bill"+(rows.length===1?"":"s")+" in this view"+pf;
+  L.innerHTML=rows.slice((LO-1)*SIZE,HI*SIZE).map(row).join("")||'<p class="small">Nothing here yet.</p>';
+  Site.pager([document.getElementById("pg1"),document.getElementById("pg2")],{total:rows.length,size:SIZE,lo:LO,hi:HI,
+    onPage:function(n){go(n,n)},onMore:function(){HI++;draw()},onSize:function(n){SIZE=n;LO=HI=1;draw()}});
+}
+function filters(){
+  var h='<b style="font-size:14px">Filter:</b><select id="chm"><option value="">Both chambers</option><option value="H"'+(CHM==="H"?" selected":"")+'>House bills (H.)</option><option value="S"'+(CHM==="S"?" selected":"")+'>Senate bills (S.)</option></select>';
+  h+='<button data-p=""'+(PFX===""?' class="on"':"")+'>All types</button>';
+  PFXS.forEach(function(p){if(CHM&&p[0].charAt(0)!==CHM)return;h+='<button data-p="'+p[0]+'"'+(PFX===p[0]?' class="on"':"")+'>'+p[1]+"</button>"});
+  var el=document.getElementById("pfx");el.innerHTML=h;
+  el.querySelectorAll("button").forEach(function(x){x.onclick=function(){PFX=x.dataset.p;LO=HI=1;filters();draw();ensureAll()}});
+  document.getElementById("chm").onchange=function(){CHM=this.value;if(PFX&&CHM&&PFX.charAt(0)!==CHM)PFX="";LO=HI=1;filters();draw();ensureAll()};
 }
 function views(){
   document.getElementById("views").innerHTML=VIEWS.map(function(v){return'<button data-v="'+v[0]+'"'+(v[0]===VIEW?' class="on"':'')+'>'+v[1]+'</button>'}).join("");
-  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;SHOW=40;document.getElementById("find").value="";views();if(VIEW==="most"&&!ALL){draw();loadAll().then(draw)}else draw()}});
+  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;LO=HI=1;document.getElementById("find").value="";views();if((VIEW==="most"||(VIEW==="recent"&&filtering()))&&!ALL){draw();loadAll().then(draw)}else draw()}});
 }
 async function load(){
   document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress. Bills are gathered from members’ sponsored and cosponsored lists, so a new bill can take a few days to appear.";
@@ -94,7 +117,7 @@ async function load(){
   TB={};Object.keys(r[3].bills||{}).forEach(function(k){TB[k]=r[3].bills[k].t});
   VIDX=r[4].concat(r[5]);
   document.getElementById("cov").textContent=META?(META.total.toLocaleString()+" bills collected"+(META.expected?" of "+META.expected.toLocaleString()+" introduced so far this Congress":"")+". Last built "+Site.fmtDate(META.updated)+"."):"The bill list has not been built yet. It is created by the next update.";
-  draw();
+  draw();ensureAll();
 }
 (async function(){
   Site.nav("bills");
@@ -103,10 +126,9 @@ async function load(){
   try{(await Site.json("data/members/directory.json")).forEach(function(e){DIR[e.id]=e})}catch(e){}
   var sel=document.getElementById("cg");
   sel.innerHTML=(info?info.congresses:[{congress:CG}]).map(function(x){return'<option value="'+x.congress+'"'+(x.congress===CG?" selected":"")+'>'+Site.ordinal(x.congress)+" Congress</option>"}).join("");
-  sel.onchange=function(){CG=parseInt(sel.value,10);history.replaceState(null,"","?congress="+CG);load()};
-  views();
-  document.getElementById("find").oninput=async function(){SHOW=40;if(this.value.trim()&&!ALL)await loadAll();draw()};
-  document.getElementById("more").onclick=function(){SHOW+=40;draw()};
+  sel.onchange=function(){CG=parseInt(sel.value,10);LO=HI=1;history.replaceState(null,"","?congress="+CG);load()};
+  views();filters();
+  document.getElementById("find").oninput=async function(){LO=HI=1;if(this.value.trim()&&!ALL)await loadAll();draw()};
   document.getElementById("goform").onsubmit=function(e){e.preventDefault();var n=parseInt(document.getElementById("gn").value,10);if(n>0)location.href="bill.html?congress="+CG+"&type="+document.getElementById("gt").value+"&number="+n};
   load();
 })();

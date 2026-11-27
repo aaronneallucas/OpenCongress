@@ -28,6 +28,7 @@ To rebuild the member statistics from scratch, delete
 data/*/*/matrix.json and data/members/directory.json and run again.
 """
 import datetime
+import html
 import json
 import os
 import re
@@ -677,45 +678,93 @@ def tracked_congresses(cgs):
     return sorted(keep)
 
 
-def update_legislation(dirmap, cgs, budget, refresh_days):
+FINAL_DAYS = 14
+
+
+def congress_end(cg):
+    """The Congress ends at noon on January 3 of the year after its second session."""
+    return datetime.date(1789 + 2 * cg, 1, 3)
+
+
+def slot_asof(old, cg):
+    """The date this member's data for Congress cg was last read, or None if it never was."""
+    if not old:
+        return None
+    slot = (old.get("congresses") or {}).get(str(cg))
+    a = slot.get("asof") if slot else None
+    if not a and (slot or cg in (old.get("tracked") or [])):
+        a = old.get("updated")  # files saved by older versions of this script
+    try:
+        return datetime.date.fromisoformat(a) if a else None
+    except (TypeError, ValueError):
+        return None
+
+
+def slot_final(asof, cg):
+    """Data read at least FINAL_DAYS after a Congress ended can no longer change, so it is never read again."""
+    return asof is not None and (asof - congress_end(cg)).days >= FINAL_DAYS
+
+
+def legislation_due(e, old, keep, today, refresh_days, force):
+    """None when this member needs nothing, else (rank, oldest date): rank 0 = a Congress never read,
+    1 = a Congress being forced, 2 = a Congress still open to change and read more than refresh_days ago."""
+    rank, oldest = None, today
+    for cg in keep:
+        if str(cg) not in e["c"]:
+            continue
+        a = slot_asof(old, cg)
+        if a is None:
+            r, a = 0, datetime.date.min
+        elif cg in force and a < today:
+            r = 1
+        elif not slot_final(a, cg) and (today - a).days >= refresh_days:
+            r = 2
+        else:
+            continue
+        rank = r if rank is None else min(rank, r)
+        oldest = min(oldest, a)
+    return None if rank is None else (rank, oldest)
+
+
+def update_legislation(dirmap, keep, budget, refresh_days, force=()):
+    """One pair of requests per member returns their whole history, so a member is only read when one of their
+    Congresses has never been read, is being forced (a manual backfill run), or is still open to change and stale."""
     if budget <= 0:
         return
     today = datetime.date.today()
-    latest = str(max(cgs))
-    ids = [e for e in dirmap.values() if BIOGUIDE.match(e["id"]) and any(str(c) in e["c"] for c in cgs)]
-
-    def key(e):
-        d = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
-        covered = bool(d) and set(c for c in cgs if str(c) in e["c"]) <= set(d.get("tracked", []))
-        return (covered, (d or {}).get("updated", ""), latest not in e["c"])
-
-    ids.sort(key=key)
-
-    def fresh(e):
+    force = set(force)
+    ids = [e for e in dirmap.values() if BIOGUIDE.match(e["id"]) and any(str(c) in e["c"] for c in keep)]
+    due = []
+    for e in ids:
         old = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
-        if not old:
-            return False
-        if not set(c for c in cgs if str(c) in e["c"]) <= set(old.get("tracked", [])):
-            return False  # this file was saved before one of the member's Congresses was being tracked
-        try:
-            return (today - datetime.date.fromisoformat(old.get("updated", "1970-01-01"))).days < refresh_days
-        except ValueError:
-            return False
-
-    todo = [e for e in ids if not fresh(e)]
-    log("Legislation: %d member(s) in the Congresses being tracked; %d need a refresh (oldest first, refreshed every %d days)." % (len(ids), len(todo), refresh_days))
+        d = legislation_due(e, old, keep, today, refresh_days, force)
+        if d:
+            due.append((d, e))
+    due.sort(key=lambda t: (t[0], t[1]["id"]))
+    todo = [e for _, e in due]
+    by = {0: 0, 1: 0, 2: 0}
+    for d, _ in due:
+        by[d[0]] += 1
+    log("Legislation: %d member(s) in the Congresses kept; %d need requests (%d never read for some Congress, %d forced, %d refreshes of Congresses still open)."
+        % (len(ids), len(todo), by[0], by[1], by[2]))
+    log("  Congresses whose data was read at least %d days after they ended are final and are skipped%s."
+        % (FINAL_DAYS, " (forcing: " + ", ".join(map(str, sorted(force))) + ")" if force else ""))
     log("  Each member needs requests for sponsored and cosponsored bills; this run may use up to %d requests, so at most %d member(s) can be done (each needs at least 2 requests)." % (budget, min(len(todo), budget // 2)))
     start = REQS
     done = 0
     tot = {"sponsored": 0, "cosponsored": 0}
     for e in todo:
         if REQS - start >= budget:
-            log("  Legislation: request budget reached (%d); the remaining %d member(s) will be refreshed on later runs." % (budget, len(todo) - done))
+            log("  Legislation: request budget reached (%d); the remaining %d member(s) will be done on later runs." % (budget, len(todo) - done))
             break
         f = os.path.join(OUT, "legislation", e["id"] + ".json")
         prev = load_json(f, None) or {}
-        data = {"updated": today.isoformat(), "tracked": sorted(cgs),
-                "congresses": {k: v for k, v in (prev.get("congresses") or {}).items() if int(k) not in cgs}}
+        mine = [cg for cg in keep if str(cg) in e["c"]]
+        data = {"updated": today.isoformat(),
+                "tracked": sorted(set(prev.get("tracked") or []) | set(mine)),
+                "congresses": dict(prev.get("congresses") or {})}
+        for cg in mine:
+            data["congresses"][str(cg)] = {"sponsored": [], "cosponsored": [], "asof": today.isoformat()}
         try:
             for kind, k in (("sponsored", "sponsoredLegislation"), ("cosponsored", "cosponsoredLegislation")):
                 items, _ = paged("/member/%s/%s-legislation" % (e["id"], kind),
@@ -725,8 +774,8 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
                 tot[kind] += len(items)
                 for x in items:
                     cg = x.get("congress")
-                    if cg in cgs:
-                        slot = data["congresses"].setdefault(str(cg), {"sponsored": [], "cosponsored": []})
+                    if cg in mine:
+                        slot = data["congresses"][str(cg)]
                         item = {"type": x.get("type"), "number": str(x.get("number")),
                                 "title": (x.get("title") or "")[:300],
                                 "date": x.get("introducedDate")}
@@ -747,7 +796,8 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
         if done % 10 == 0 or done == len(todo):
             log("  Legislation progress: %d of %d member(s) refreshed | %d sponsored and %d cosponsored bills read | %d of %d requests used | elapsed %s"
                 % (done, len(todo), tot["sponsored"], tot["cosponsored"], REQS - start, budget, elapsed()))
-    note("Legislation: refreshed sponsored and cosponsored bills for %d member(s) using %d requests (%d sponsored and %d cosponsored bills read)" % (done, REQS - start, tot["sponsored"], tot["cosponsored"]))
+    note("Legislation: read sponsored and cosponsored bills for %d member(s) using %d requests (%d sponsored and %d cosponsored bills read); %d still waiting"
+         % (done, REQS - start, tot["sponsored"], tot["cosponsored"], len(todo) - done))
 
 
 def apply_counts(dirmap, cgs):
@@ -766,6 +816,106 @@ def apply_counts(dirmap, cgs):
             c["cosponsored"] = len(slot["cosponsored"]) if slot else 0
             n += 1
     log("Legislation counts saved for %d member/Congress pair(s)." % n)
+# ---------------------------------------------------------------- CRS bill summaries (bulk)
+SUMCHUNK = 250
+
+
+def plain_text(html_text, limit=3000):
+    """CRS summaries come as HTML; keep paragraphs and list items as plain text lines."""
+    t = re.sub(r"(?i)</(p|li|div|h\d)>|<br\s*/?>", "\n", html_text or "")
+    t = re.sub(r"(?s)<[^>]+>", "", t)
+    t = html.unescape(t)
+    t = "\n".join(re.sub(r"[ \t ]+", " ", ln).strip() for ln in t.split("\n"))
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    if len(t) > limit:
+        t = t[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    return t
+
+
+def snippet(text, limit=150):
+    """The first sentence or so of a summary, for the bill lists."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    t = re.sub(r"^(This (bill|joint resolution|resolution|concurrent resolution)|The bill)\s+", "", t)
+    t = t[:1].upper() + t[1:]
+    if len(t) <= limit:
+        return t
+    cut = t[:limit]
+    m = re.search(r"^(.{40,}?[.;])\s", t[:limit + 60])
+    if m and len(m.group(1)) <= limit + 40:
+        return m.group(1)
+    return cut.rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def update_summaries(cgs, budget):
+    """data/summaries/{cg}/{TYPE}-{k}.json (250 bill numbers per file): {number: {t, d, a, u}} holding the newest CRS
+    summary of each bill. The bulk /summaries/{congress} endpoint returns 250 summaries per request, so a whole Congress
+    takes a few dozen requests. It only returns recent items unless fromDateTime is given, so each Congress remembers
+    how far it has read (meta.json 'through') and carries on from there."""
+    if budget <= 0:
+        return
+    start_reqs = REQS
+    for cg in sorted(cgs, reverse=True):
+        base = os.path.join(OUT, "summaries", str(cg))
+        meta = load_json(os.path.join(base, "meta.json"), {})
+        through = meta.get("through")
+        today = datetime.date.today()
+        if through and (today - congress_end(cg)).days >= FINAL_DAYS and meta.get("final"):
+            continue
+        frm = through or datetime.date(1789 + 2 * (cg - 1), 1, 1).isoformat() + "T00:00:00Z"
+        to = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        offset, got, chunks, last, finished = 0, 0, {}, through, False
+        while REQS - start_reqs < budget:
+            try:
+                j = get("/summaries/%d" % cg, fromDateTime=frm, toDateTime=to, sort="updateDate asc", offset=offset)
+            except Exception as ex:
+                log("  summaries for Congress %d failed: %s" % (cg, ex))
+                break
+            page = find_list(j, "summaries")
+            for x in page:
+                b = x.get("bill") or {}
+                ty, n = (b.get("type") or "").upper(), str(b.get("number") or "")
+                if not ty or not n.isdigit():
+                    continue
+                key = (ty, (int(n) - 1) // SUMCHUNK)
+                if key not in chunks:
+                    chunks[key] = load_json(os.path.join(base, "%s-%d.json" % key), {})
+                row = {"t": plain_text(x.get("text")), "d": x.get("actionDate") or "", "a": x.get("actionDesc") or "",
+                       "u": x.get("updateDate") or ""}
+                if row["t"]:
+                    old = chunks[key].get(n)
+                    if not old or (row["u"] or "") >= (old.get("u") or ""):
+                        chunks[key][n] = row
+                        got += 1
+                if x.get("updateDate"):
+                    last = x["updateDate"]
+            if len(page) < 250:
+                finished = True
+                break
+            offset += 250
+        for (ty, k), rows in chunks.items():
+            save_json(os.path.join(base, "%s-%d.json" % (ty, k)), rows)
+        if last:
+            meta = {"through": last, "updated": today.isoformat(), "complete": finished}
+            meta["final"] = bool(finished and (today - congress_end(cg)).days >= FINAL_DAYS)
+            save_json(os.path.join(base, "meta.json"), meta)
+        note("Summaries: Congress %d, %d summary(ies) saved%s" % (cg, got, "" if finished else " (more on the next run)"))
+        if REQS - start_reqs >= budget:
+            log("  Summaries: request budget reached (%d); the rest will be read on later runs." % budget)
+            break
+
+
+def summary_snippets(cg, rows):
+    """Add the first-sentence snippet 'm' to bill-list rows from the saved summaries."""
+    cache = {}
+    for r in rows:
+        key = (r["y"], (r["n"] - 1) // SUMCHUNK)
+        if key not in cache:
+            cache[key] = load_json(os.path.join(OUT, "summaries", str(cg), "%s-%d.json" % key), {})
+        s = cache[key].get(str(r["n"]))
+        if s and s.get("t"):
+            r["m"] = snippet(s["t"])
+
+
 # ---------------------------------------------------------------- bill lists (built from members' sponsored/cosponsored files)
 BILLTITLES = {}
 CHUNK = 2000
@@ -816,6 +966,7 @@ def build_bills(dirmap, cgs):
         for r in bills.values():
             groups.setdefault((r["y"], (r["n"] - 1) // CHUNK), []).append(r)
         chunks = {}
+        summary_snippets(cg, bills.values())
         for (ty, k), rows in groups.items():
             rows.sort(key=lambda r: r["n"])
             save_json(os.path.join(base, "%s-%d.json" % (ty, k)), rows)
@@ -905,6 +1056,60 @@ def update_titles(cgs, budget):
 
 
 
+# ---------------------------------------------------------------- member contact details
+LEGISLATORS = "https://unitedstates.github.io/congress-legislators/"
+
+
+def update_contacts():
+    """data/members/contact.json: official website, phone, contact form, office and social accounts of each sitting member,
+    from the public congress-legislators project (two small files, so two requests in total)."""
+    path = os.path.join(OUT, "members", "contact.json")
+    old = load_json(path, {})
+    if old.get("updated") == datetime.date.today().isoformat() and old.get("members"):
+        log("Contact details were already saved today (%d members)." % len(old["members"]))
+        return
+    raw = fetch_bytes(LEGISLATORS + "legislators-current.json")
+    if not raw:
+        note("Contact details: could not download the current legislators file; keeping what was saved")
+        return
+    try:
+        people = json.loads(raw.decode("utf-8"))
+    except Exception as ex:
+        note("Contact details: the legislators file could not be read (%s); keeping what was saved" % ex)
+        return
+    social = {}
+    raw2 = fetch_bytes(LEGISLATORS + "legislators-social-media.json")
+    if raw2:
+        try:
+            for s in json.loads(raw2.decode("utf-8")):
+                b = (s.get("id") or {}).get("bioguide")
+                if b:
+                    social[b] = s.get("social") or {}
+        except Exception as ex:
+            log("  social media file could not be read:", ex)
+    out = {}
+    for p in people:
+        b = (p.get("id") or {}).get("bioguide")
+        terms = p.get("terms") or []
+        if not b or not terms:
+            continue
+        t = terms[-1]
+        row = {}
+        for k, v in (("w", t.get("url")), ("p", t.get("phone")), ("f", t.get("contact_form")),
+                     ("a", t.get("address")), ("o", t.get("office")), ("r", t.get("rss_url"))):
+            if v:
+                row[k] = str(v).strip()
+        sc = social.get(b) or {}
+        x = {k: str(sc[k]).strip() for k in ("twitter", "facebook", "youtube", "instagram") if sc.get(k)}
+        if x:
+            row["x"] = x
+        if row:
+            out[b] = row
+    if out:
+        save_json(path, {"updated": datetime.date.today().isoformat(), "members": out})
+    note("Contact details: saved official website, phone and contact information for %d sitting member(s)" % len(out))
+
+
 # ---------------------------------------------------------------- bills signed into law
 def update_laws(cgs, run_cgs=None):
     """data/laws/{cg}.json: every public and private law of the Congress, from the Congress.gov law endpoint.
@@ -967,9 +1172,11 @@ def main():
     plan.append("Save the member directory and the list of Congresses")
     plan.append("Sponsored and cosponsored bills for members (up to %d requests)" % leg_budget if leg_budget > 0 else
                 "Sponsored and cosponsored bills (skipped: LEG_BUDGET is 0)")
+    plan.append("CRS bill summaries (bulk, 250 per request, up to %s requests)" % os.environ.get("SUMMARY_BUDGET", "80"))
     plan.append("Bill lists for the Bills tab (built from the sponsored/cosponsored files, 1 request per Congress)")
     plan.append("Bill and amendment titles for the votes (up to %d requests)" % title_budget)
     plan.append("Bills signed into law (public and private laws) for each Congress")
+    plan.append("Member contact details (website, phone, contact form) from congress-legislators")
     plan.append("Save sponsored/cosponsored counts and the data status")
     STEP["of"] = len(plan)
     log("Congresses to update: " + ", ".join(str(c) for c in cgs))
@@ -992,13 +1199,18 @@ def main():
     keep = tracked_congresses(cgs)
     log("Bill data is kept for Congress(es): %s (this run updates %s)." % (", ".join(map(str, keep)), ", ".join(map(str, cgs))))
     step("Sponsored and cosponsored bills")
-    update_legislation(dirmap, keep, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    force = cgs if (os.environ.get("FORCE_REFRESH", "").lower() in ("1", "true", "yes") and env) else []
+    update_legislation(dirmap, keep, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")), force)
+    step("Bill summaries")
+    update_summaries(keep, int(os.environ.get("SUMMARY_BUDGET", "80")))
     step("Bill lists")
     build_bills(dirmap, keep)
     step("Bill and amendment titles")
     update_titles(keep, title_budget)
     step("Bills signed into law")
     update_laws(keep, cgs)
+    step("Member contact details")
+    update_contacts()
     step("Saving legislation counts and status")
     apply_counts(dirmap, keep)
     save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))

@@ -12,6 +12,7 @@
 <h1 id="h">Member</h1>
 <p class="sub" id="sub"></p>
 <div class="chips" id="cg"></div>
+<div class="panel cnt" id="contact" style="display:none"><h2>Contact</h2><dl id="cdl"></dl></div>
 <div class="cards" id="cards"></div>
 <p class="small" id="note"></p>
 
@@ -122,6 +123,27 @@ document.getElementById("ptabs").addEventListener("click",function(e){if(e.targe
 document.getElementById("vq").oninput=function(){shown=100;drawVotes()};
 document.getElementById("vmore").onclick=function(){shown+=100;drawVotes()};
 
+var CONTACT=null;
+async function drawContact(){
+  var box=document.getElementById("contact");box.style.display="none";
+  if(CONTACT===null){try{CONTACT=(await Site.json("data/members/contact.json")).members||{}}catch(e){CONTACT={}}}
+  var c=CONTACT[ME.id];if(!c)return;
+  function link(u,t){return'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(t||u)+"</a>"}
+  var rows=[];
+  if(c.w)rows.push(["Official website",link(c.w,c.w.replace(/^https?:\/\//,"").replace(/\/$/,""))]);
+  if(c.p)rows.push(["Phone",'<a href="tel:'+esc(c.p.replace(/[^0-9+]/g,""))+'">'+esc(c.p)+"</a>"]);
+  if(c.f)rows.push(["Contact form",link(c.f,"Send a message")]);
+  if(c.a)rows.push(["Washington office",esc(c.a)]);
+  var x=c.x||{},soc=[];
+  if(x.twitter)soc.push(link("https://x.com/"+encodeURIComponent(x.twitter),"X: @"+x.twitter));
+  if(x.facebook)soc.push(link("https://www.facebook.com/"+encodeURIComponent(x.facebook),"Facebook"));
+  if(x.instagram)soc.push(link("https://www.instagram.com/"+encodeURIComponent(x.instagram),"Instagram"));
+  if(x.youtube)soc.push(link("https://www.youtube.com/@"+encodeURIComponent(x.youtube),"YouTube"));
+  if(soc.length)rows.push(["Social media",soc.join(" · ")]);
+  if(!rows.length)return;
+  document.getElementById("cdl").innerHTML=rows.map(function(r){return"<dt>"+r[0]+"</dt><dd>"+r[1]+"</dd>"}).join("");
+  box.style.display="";
+}
 async function loadCongress(){
   var c=ME.c[CG],s;
   CH=c.chamber;R=Site.ranks(DIR,CH,CG);
@@ -131,6 +153,7 @@ async function loadCongress(){
   var pn={D:"Democratic",R:"Republican",I:"Independent"}[c.party]||c.party||"";
   document.getElementById("sub").innerHTML='<span class="badge '+((c.party==="D"||c.party==="R")?c.party:"I")+'">'+esc(c.party||"?")+"</span> "+esc(pn)+" · "+esc(c.state)+(CH==="house"&&c.district?", District "+c.district:"")+" · "+Site.ordinal(CG)+" Congress "+Site.chamberName(CH);
   document.getElementById("back").href="members.html?chamber="+CH+"&congress="+CG;
+  drawContact();
   document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call. Maverick score adds, for each such vote, the number of party members who voted with the majority minus the number who voted against.";
   try{
     var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);

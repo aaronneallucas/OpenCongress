@@ -13,6 +13,7 @@
 <p id="title" style="font-size:17px;max-width:900px"></p>
 <div class="cards" id="cards"></div>
 <p class="small" id="links"></p>
+<div class="panel" id="sump"><h2>Summary</h2><div class="sumtext" id="sum"></div><p class="small" id="sumn"></p></div>
 <div class="panel" id="tickp" style="display:none"><h2>Cosponsors by party</h2><div id="ticks" style="line-height:0"></div><p class="small" id="tickn"></p></div>
 <div class="panel" id="chp" style="display:none"><h2>Cosponsors over time</h2><div class="chart" id="cch" style="max-width:760px"></div><div class="lg" id="clg"></div><p class="small">Dates are when each member signed on, so the first step is the bill’s original cosponsors. The horizontal axis spans the two years of the Congress.</p></div>
 <div class="chips" id="btabs"><button data-t="votes" class="on">Roll call votes</button><button data-t="cos">Cosponsors</button></div>
@@ -62,6 +63,13 @@ function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><di
     document.getElementById("clg").innerHTML=S.map(function(s){return'<span><i style="background:'+s.color+'"></i>'+s.label+" ("+s.c.total+")</span>"}).join("")}
   document.querySelector('#btabs [data-t="cos"]').textContent="Cosponsors ("+(rec?D+R+O:0)+")";
   document.getElementById("cosl").innerHTML=cr.length?'<div class="tblwrap"><table class="tbl"><thead><tr><th>Member</th><th>Party</th><th>State</th><th>Date cosponsored</th></tr></thead><tbody>'+cr.map(function(x){return'<tr><td><a href="'+Site.memberHref(x.id,CG)+'">'+esc(x.e.first+" "+x.e.last)+'</a></td><td>'+esc(x.c.party||"")+"</td><td>"+esc((x.c.state||"")+(x.c.district?"-"+x.c.district:""))+"</td><td>"+(x.date?esc(Site.fmtDate(x.date)):"\u2014")+"</td></tr>"}).join("")+"</tbody></table></div>":'<p class="small">No cosponsors collected for this bill.</p>';
+  try{
+    var sm=(await Site.json("data/summaries/"+CG+"/"+ty+"-"+Math.floor((n-1)/250)+".json"))[String(n)];
+    if(sm&&sm.t){
+      document.getElementById("sum").innerHTML=sm.t.split(/\n+/).filter(Boolean).map(function(p){return"<p>"+esc(p)+"</p>"}).join("");
+      document.getElementById("sumn").textContent="Summary written by the Congressional Research Service"+(sm.a?" for the stage: "+sm.a:"")+(sm.d?" ("+Site.fmtDate(sm.d)+")":"")+". Long summaries are shortened here; the full text is on Congress.gov."
+    }else throw 0;
+  }catch(e){document.getElementById("sum").innerHTML='<p class="small">No summary collected for this bill. The Congressional Research Service writes summaries only after a bill has moved, and they appear here after the next update.</p>'}
   var url=Site.billUrl(ty,n,CG);
   document.getElementById("links").innerHTML=url?'<a href="'+url+'" target="_blank" rel="noopener">View '+esc(label)+" on Congress.gov</a>":"";
   var votes=[];r[3].forEach(function(v){if(v.bill===key)votes.push(v)});r[4].forEach(function(v){if(v.bill===key)votes.push(v)});

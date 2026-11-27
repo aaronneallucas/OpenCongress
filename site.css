@@ -111,3 +111,15 @@ input[type=search],input[type=text]{width:100%}
 .yb{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:6px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fafaf8}
 .yv{font-size:14px;padding:4px 14px;border-radius:14px;border:1px solid #bbb;background:#fff;cursor:pointer}
 .yv.on.y{background:var(--yes);color:#fff;border-color:var(--yes)}.yv.on.n{background:var(--no);color:#fff;border-color:var(--no)}
+
+/* pager */
+.pager{display:flex;gap:10px 14px;flex-wrap:wrap;align-items:center;margin:12px 0;font-size:14px}
+.pager .pi{color:var(--muted)}
+.pager .pn{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.pager .pn button{min-width:34px;padding:5px 9px}
+.pager .pn button:disabled{opacity:.4;cursor:default}
+.pager .pe{color:var(--muted);padding:0 2px}
+.pager .ps{color:var(--muted)}.pager .ps select{padding:4px 6px}
+.pager .pm{font-weight:600}
+.sumtext p{margin:0 0 .7em;max-width:860px;line-height:1.5}
+.cnt dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0}.cnt dt{color:var(--muted)}.cnt dd{margin:0}

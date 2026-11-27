@@ -133,6 +133,35 @@
     }
     return (b && b.t) || "";
   };
+  /* Page numbers plus "Show more". o = {total, size, lo, hi, sizes, onPage(n), onMore(), onSize(n)}; lo..hi is the range of pages on screen. */
+  Site.pager = function (els, o) {
+    var pages = Math.max(1, Math.ceil(o.total / o.size)), seen = {}, nums = [];
+    function add(p) { if (p >= 1 && p <= pages && !seen[p]) { seen[p] = 1; nums.push(p); } }
+    add(1); for (var p = o.lo - 2; p <= o.hi + 2; p++) add(p); add(pages);
+    nums.sort(function (a, b) { return a - b; });
+    var from = o.total ? (o.lo - 1) * o.size + 1 : 0, to = Math.min(o.total, o.hi * o.size);
+    var h = '<span class="pi">' + (o.total ? "Showing " + from.toLocaleString() + "\u2013" + to.toLocaleString() + " of " + o.total.toLocaleString() : "Nothing to show") + "</span>";
+    if (pages > 1) {
+      h += '<span class="pn"><button data-p="' + (o.lo - 1) + '"' + (o.lo <= 1 ? " disabled" : "") + ">\u2039 Prev</button>";
+      var prev = 0;
+      nums.forEach(function (p) {
+        if (p - prev > 1) h += '<span class="pe">\u2026</span>';
+        h += '<button data-p="' + p + '"' + (p >= o.lo && p <= o.hi ? ' class="on"' : "") + ">" + p + "</button>";
+        prev = p;
+      });
+      h += '<button data-p="' + (o.hi + 1) + '"' + (o.hi >= pages ? " disabled" : "") + ">Next \u203a</button></span>";
+    }
+    h += '<label class="ps">Per page <select data-s>' + (o.sizes || [25, 50, 100]).map(function (n) { return '<option value="' + n + '"' + (n === o.size ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></label>";
+    if (o.hi < pages) h += '<button class="pm" data-more="1">Show more</button>';
+    els.forEach(function (el) {
+      if (!el) return;
+      el.className = "pager";
+      el.innerHTML = h;
+      el.querySelectorAll("button[data-p]").forEach(function (b) { b.onclick = function () { o.onPage(parseInt(b.getAttribute("data-p"), 10)); }; });
+      var m = el.querySelector("[data-more]"); if (m) m.onclick = function () { o.onMore(); };
+      el.querySelector("select[data-s]").onchange = function () { o.onSize(parseInt(this.value, 10)); };
+    });
+  };
   Site.clip = function (s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "\u2026" : s; };
   Site.voteTitle = function (j) {
     return "Roll Call " + j.roll + (j.bill ? " \u2014 " + Site.billLabel(j.bill) : (j.question ? " \u2014 " + j.question : ""));
