@@ -29,7 +29,7 @@
 <script src="site.js"></script>
 <script>
 var esc=Site.esc,CG=119,VIEW="recent",SIZE=50,LO=1,HI=1,PFX="",CHM="",ALL=null,META=null,TB={},DIR={},VIDX=[],LAWS=[],RECENT=[];
-var VIEWS=[["recent","Recently introduced"],["most","Most cosponsors"],["voted","Voted on"],["law","Signed into law"]];
+var VIEWS=[["recent","All bills, newest first"],["most","Most cosponsors"],["voted","Voted on"],["law","Signed into law"]];
 var TYPES={HR:1,S:1,HRES:1,SRES:1,HJRES:1,SJRES:1,HCONRES:1,SCONRES:1};
 var PFXS=[["HR","H.R."],["S","S."],["HRES","H.Res."],["SRES","S.Res."],["HJRES","H.J.Res."],["SJRES","S.J.Res."],["HCONRES","H.Con.Res."],["SCONRES","S.Con.Res."]];
 function pass(r){return(!PFX||r.y===PFX)&&(!CHM||String(r.y).charAt(0)===CHM)}
@@ -59,9 +59,9 @@ function current0(){
     return ALL.filter(function(r){var h=(Site.billLabel(r.y+" "+r.n)+" "+r.y+" "+r.n+" "+r.t).toLowerCase();return toks.every(function(t){return h.indexOf(t)>-1})}).sort(function(a,b){return(b.d||"")<(a.d||"")?-1:1});
   }
   if(VIEW==="recent"){
-    if(!filtering())return RECENT;
-    if(!ALL)return null;
-    return ALL.slice().sort(function(a,b){return(b.d||"")<(a.d||"")?-1:(b.d||"")>(a.d||"")?1:b.n-a.n});
+    if(!ALL)return META?null:RECENT;
+    if(!ALL.sortedNew)ALL.sortedNew=ALL.slice().sort(function(a,b){return(b.d||"")<(a.d||"")?-1:(b.d||"")>(a.d||"")?1:b.n-a.n});
+    return ALL.sortedNew;
   }
   if(VIEW==="most"){if(!ALL)return null;return ALL.filter(function(r){return csTot(r)>0}).sort(function(a,b){return csTot(b)-csTot(a)||((b.d||"")<(a.d||"")?-1:1)})}
   if(VIEW==="law")return LAWS;
@@ -76,7 +76,7 @@ async function loadAll(){
   var jobs=[];Object.keys(META.chunks).forEach(function(ty){META.chunks[ty].forEach(function(k){jobs.push(Site.json("data/billlist/"+CG+"/"+ty+"-"+k+".json").catch(function(){return[]}))})});
   var parts=await Promise.all(jobs);ALL=[].concat.apply([],parts);
 }
-function ensureAll(){return filtering()&&VIEW==="recent"&&!ALL?loadAll().then(draw):null}
+function ensureAll(){return VIEW==="recent"&&!ALL?loadAll().then(draw):null}
 function go(lo,hi){LO=lo;HI=hi;draw();window.scrollTo(0,document.getElementById("pg1").getBoundingClientRect().top+window.pageYOffset-70)}
 function draw(){
   var rows=current(),L=document.getElementById("list");
@@ -100,7 +100,7 @@ function filters(){
 }
 function views(){
   document.getElementById("views").innerHTML=VIEWS.map(function(v){return'<button data-v="'+v[0]+'"'+(v[0]===VIEW?' class="on"':'')+'>'+v[1]+'</button>'}).join("");
-  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;LO=HI=1;document.getElementById("find").value="";views();if((VIEW==="most"||(VIEW==="recent"&&filtering()))&&!ALL){draw();loadAll().then(draw)}else draw()}});
+  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;LO=HI=1;document.getElementById("find").value="";views();if((VIEW==="most"||VIEW==="recent")&&!ALL){draw();loadAll().then(draw)}else draw()}});
 }
 async function load(){
   document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress. Bills are gathered from members’ sponsored and cosponsored lists, so a new bill can take a few days to appear.";
