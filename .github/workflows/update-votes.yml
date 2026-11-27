@@ -11,9 +11,19 @@ on:
       leg_budget:
         description: "Max API requests for sponsored/cosponsored bills (0 skips them)"
         default: "150"
+      title_budget:
+        description: "Max API requests for bill and amendment titles"
+        default: "400"
+      summary_budget:
+        description: "Max API requests for CRS bill summaries (250 summaries per request)"
+        default: "80"
       congresses:
         description: "Congresses to update, comma separated (blank = the current Congress, plus the previous one for 21 days after a new Congress begins)"
         default: ""
+      force_refresh:
+        description: "Backfill: re-read sponsored/cosponsored bills for the Congresses listed above, even if they are finished (needs the list filled in)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,6 +46,9 @@ jobs:
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
           MAX_NEW: ${{ inputs.max_new || '60' }}
           LEG_BUDGET: ${{ inputs.leg_budget || '150' }}
+          TITLE_BUDGET: ${{ inputs.title_budget || '400' }}
+          SUMMARY_BUDGET: ${{ inputs.summary_budget || '80' }}
+          FORCE_REFRESH: ${{ inputs.force_refresh && '1' || '' }}
           CONGRESSES: ${{ inputs.congresses }}
         run: python update_votes.py
       - name: Commit changes
