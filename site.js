@@ -85,6 +85,7 @@
     }
     host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Open Congress</a>' +
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
+      '<div class="tab' + (active === "bills" ? " on" : "") + '"><button type="button" data-href="bills.html">Bills</button></div>' +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
       '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div>' +
       '<div class="tab' + (active === "data" ? " on" : "") + '"><button type="button" data-href="data.html">Data</button></div>' +
@@ -114,6 +115,25 @@
     if (!m || !BL[m[1].toUpperCase()]) return String(b || "");
     return BL[m[1].toUpperCase()] + " " + m[2];
   };
+
+  /* Bill titles and amendment purposes saved by the update script (data/bills/{cg}.json). */
+  var BILLS = {};
+  Site.bills = function (cg) {
+    if (!BILLS[cg]) BILLS[cg] = Site.json("data/bills/" + cg + ".json").catch(function () { return {bills: {}, amendments: {}}; });
+    return BILLS[cg];
+  };
+  /* One line of context for a vote: the bill's title, or for an amendment its purpose. */
+  Site.context = function (v, T) {
+    T = T || {};
+    var am = v.amendment && T.amendments && T.amendments[v.amendment], b = v.bill && T.bills && T.bills[v.bill];
+    if (v.amendment) {
+      var to = v.bill ? Site.billLabel(v.bill) : (am && am.to ? Site.billLabel(am.to) : "");
+      var what = am && am.p ? am.p : (b && b.t) || (am && am.tt) || "";
+      return "Amendment" + (to ? " to " + to : "") + (what ? ": " + what : "");
+    }
+    return (b && b.t) || "";
+  };
+  Site.clip = function (s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "\u2026" : s; };
   Site.voteTitle = function (j) {
     return "Roll Call " + j.roll + (j.bill ? " \u2014 " + Site.billLabel(j.bill) : (j.question ? " \u2014 " + j.question : ""));
   };

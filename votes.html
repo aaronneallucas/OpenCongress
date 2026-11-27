@@ -59,6 +59,7 @@ async function enrich(v) {
     }
   } catch (e) {}
 }
+var TB = {};
 function draw() {
   var q = document.getElementById("find").value.toLowerCase();
   var f = IDX.filter(function (v) {
@@ -68,6 +69,7 @@ function draw() {
     var other = ("present" in v) ? "Present " + v.present + " · Not voting " + v.notVoting : "";
     return '<a class="row" data-k="' + vk(v) + '" href="' + Site.voteHref(CH, CG, v.session, v.roll) + '">' +
       '<div class="t">' + (v.bill ? "<b>" + esc(v.bill) + "</b> · " : "") + esc(v.question || "Roll call") + "</div>" +
+      (Site.context(v, TB) ? '<div class="tt">' + esc(Site.clip(Site.context(v, TB), 150)) + "</div>" : "") +
       (v.title && v.title !== v.question ? '<div class="tt">' + esc(v.title) + "</div>" : "") +
       '<div class="m">Roll ' + v.roll + " · " + esc(Site.fmtDate(v.date)) + (v.result ? " · " + esc(v.result) : "") + "</div>" +
       '<div class="bw"><span class="bs">' + bar(v) + '</span><div class="c"><span class="y">YES ' + v.yes + '</span><span class="n">NO ' + v.no + "</span></div></div>" +
@@ -91,6 +93,7 @@ document.getElementById("more").onclick = function () { shown += 40; draw(); };
   document.title = title + " — " + Site.ordinal(CG) + " Congress";
   try {
     IDX = await Site.json("data/" + CH + "/" + CG + "/index.json");
+    TB = await Site.bills(CG);
   } catch (e) {
     document.getElementById("msg").textContent = "No saved votes found yet for the " + Site.ordinal(CG) + " Congress " + Site.chamberName(CH) + " (" + e.message + ").";
     return;

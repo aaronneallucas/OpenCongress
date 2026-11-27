@@ -39,9 +39,9 @@ function csvCell(v){v=String(v==null?"":v);if(/^[=+\-@]/.test(v))v="'"+v;return 
 function csv(head,rows){return"﻿"+[head].concat(rows).map(function(r){return r.map(csvCell).join(",")}).join("\r\n")+"\r\n"}
 function save(name,text){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/csv;charset=utf-8"}));a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500)}
 var DIR=null;
-window.dlVotes=async function(ch,cg){var idx=await Site.json("data/"+ch+"/"+cg+"/index.json");
-  save(ch+"-"+cg+"-votes.csv",csv(["Session","Roll","Date","Bill","Question","Result","Dem Yes","Dem No","Rep Yes","Rep No","Ind Yes","Ind No"],
-    idx.map(function(v){return[v.session,v.roll,v.date,v.bill,v.question,v.result,v.dY,v.dN,v.rY,v.rN,v.iY,v.iN]})))};
+window.dlVotes=async function(ch,cg){var idx=await Site.json("data/"+ch+"/"+cg+"/index.json"),TB=await Site.bills(cg);
+  save(ch+"-"+cg+"-votes.csv",csv(["Session","Roll","Date","Bill","Amendment","Title","Question","Result","Dem Yes","Dem No","Rep Yes","Rep No","Ind Yes","Ind No"],
+    idx.map(function(v){return[v.session,v.roll,v.date,v.bill,v.amendment,Site.context(v,TB),v.question,v.result,v.dY,v.dN,v.rY,v.rN,v.iY,v.iN]})))};
 window.dlMembers=function(ch,cg){
   save(ch+"-"+cg+"-members.csv",csv(["Member ID","Last","First","Party","State","District","Votes","Missed","Present","Against party","Party votes","Maverick score","Sponsored","Cosponsored"],
     DIR.filter(function(e){var s=e.c&&e.c[cg];return s&&s.chamber===ch}).map(function(e){var s=e.c[cg];

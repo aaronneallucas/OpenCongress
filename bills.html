@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bills — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<h1>Bills</h1>
+<p class="sub" id="sub"></p>
+<div class="chips">
+  <select id="cg"></select>
+  <span id="views"></span>
+  <input id="find" type="search" placeholder="Search all collected bills by title or number" style="flex:1 1 260px;max-width:420px;width:auto">
+</div>
+<p class="small" id="count"></p>
+<div id="list"></div>
+<button id="more" style="display:none;margin:12px 0">Show more</button>
+<p class="small" id="cov"></p>
+<p class="foot">Data: Congress.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,VIEW="recent",SHOW=40,ALL=null,META=null,TB={},DIR={},VIDX=[],LAWS=[],RECENT=[];
+var VIEWS=[["recent","Recently introduced"],["voted","Voted on"],["law","Signed into law"]];
+function pc(p){return p==="D"||p==="R"?p:"I"}
+function row(r){
+  var label=Site.billLabel(r.y+" "+r.n),href="bill.html?congress="+CG+"&type="+encodeURIComponent(r.y)+"&number="+r.n;
+  var m=[];
+  if(r.d)m.push((r.kind==="vote"?"Last vote ":r.kind==="law"?"Signed ":"Introduced ")+Site.fmtDate(r.d));
+  if(r.s&&DIR[r.s])m.push("Sponsor: "+esc(DIR[r.s].first+" "+DIR[r.s].last)+" ("+r.sp+")");
+  var cs=[];if(r.cd)cs.push(r.cd+" D");if(r.cr)cs.push(r.cr+" R");if(r.ci)cs.push(r.ci+" other");
+  if(cs.length)m.push("Cosponsors: "+cs.join(", "));
+  if(r.votes)m.push(r.votes+" roll call vote"+(r.votes>1?"s":""));
+  var law=r.l?' <span class="law">Law '+esc(r.l)+"</span>":"";
+  var title=r.t||TB[r.y+" "+r.n]||"";
+  return'<a class="row" href="'+href+'"><div class="t"><b>'+esc(label)+"</b>"+law+"</div>"+(title?'<div class="tt">'+esc(Site.clip(title,260))+"</div>":"")+'<div class="m">'+m.map(function(x){return x.indexOf("Sponsor")===0?x:esc(x)}).join(" · ")+"</div></a>";
+}
+function current(){
+  var q=document.getElementById("find").value.toLowerCase().trim();
+  if(q){
+    if(!ALL)return null;
+    var toks=q.split(/\s+/);
+    return ALL.filter(function(r){var h=(Site.billLabel(r.y+" "+r.n)+" "+r.y+" "+r.n+" "+r.t).toLowerCase();return toks.every(function(t){return h.indexOf(t)>-1})}).sort(function(a,b){return(b.d||"")<(a.d||"")?-1:1});
+  }
+  if(VIEW==="recent")return RECENT;
+  if(VIEW==="law")return LAWS;
+  var by={};
+  VIDX.forEach(function(v){if(!v.bill)return;var m=v.bill.match(/^([A-Za-z]+)\s*(\d+)$/);if(!m)return;var k=m[1].toUpperCase()+" "+m[2];
+    var o=by[k]||(by[k]={y:m[1].toUpperCase(),n:parseInt(m[2],10),d:"",votes:0,kind:"vote"});o.votes++;if((v.date||"")>o.d)o.d=v.date||""});
+  return Object.keys(by).map(function(k){return by[k]}).sort(function(a,b){return(b.d||"")<(a.d||"")?-1:1});
+}
+async function loadAll(){
+  if(ALL||!META)return;
+  document.getElementById("count").textContent="Loading all collected bills…";
+  var jobs=[];Object.keys(META.chunks).forEach(function(ty){META.chunks[ty].forEach(function(k){jobs.push(Site.json("data/billlist/"+CG+"/"+ty+"-"+k+".json").catch(function(){return[]}))})});
+  var parts=await Promise.all(jobs);ALL=[].concat.apply([],parts);
+}
+function draw(){
+  var rows=current(),L=document.getElementById("list");
+  if(rows===null){document.getElementById("count").textContent="Loading…";return}
+  var q=document.getElementById("find").value.trim();
+  document.getElementById("count").textContent=q?rows.length+" bill"+(rows.length===1?"":"s")+" match":rows.length+" bill"+(rows.length===1?"":"s")+" in this view";
+  L.innerHTML=rows.slice(0,SHOW).map(row).join("")||'<p class="small">Nothing here yet.</p>';
+  document.getElementById("more").style.display=rows.length>SHOW?"":"none";
+}
+function views(){
+  document.getElementById("views").innerHTML=VIEWS.map(function(v){return'<button data-v="'+v[0]+'"'+(v[0]===VIEW?' class="on"':'')+'>'+v[1]+'</button>'}).join("");
+  document.querySelectorAll("#views button").forEach(function(b){b.onclick=function(){VIEW=b.dataset.v;SHOW=40;document.getElementById("find").value="";views();draw()}});
+}
+async function load(){
+  document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress. Bills are gathered from members’ sponsored and cosponsored lists, so a new bill can take a few days to appear.";
+  ALL=null;META=null;
+  var r=await Promise.all([
+    Site.json("data/billlist/"+CG+"/meta.json").catch(function(){return null}),
+    Site.json("data/billlist/"+CG+"/recent.json").catch(function(){return[]}),
+    Site.json("data/laws/"+CG+".json").catch(function(){return{laws:[]}}),
+    Site.bills(CG),
+    Site.json("data/house/"+CG+"/index.json").catch(function(){return[]}),
+    Site.json("data/senate/"+CG+"/index.json").catch(function(){return[]})]);
+  META=r[0];RECENT=r[1];
+  LAWS=r[2].laws.slice().sort(function(a,b){return(b.date||"")<(a.date||"")?-1:1}).map(function(l){return{y:l.type,n:parseInt(l.number,10),t:l.title,d:l.date,l:l.law,kind:"law"}});
+  TB={};Object.keys(r[3].bills||{}).forEach(function(k){TB[k]=r[3].bills[k].t});
+  VIDX=r[4].concat(r[5]);
+  document.getElementById("cov").textContent=META?(META.total.toLocaleString()+" bills collected"+(META.expected?" of "+META.expected.toLocaleString()+" introduced so far this Congress":"")+". Last built "+Site.fmtDate(META.updated)+"."):"The bill list has not been built yet. It is created by the next update.";
+  draw();
+}
+(async function(){
+  Site.nav("bills");
+  var info=await Site.congresses(),q=Site.qs();
+  CG=parseInt(q.get("congress"),10)||(info?info.latest:119);
+  try{(await Site.json("data/members/directory.json")).forEach(function(e){DIR[e.id]=e})}catch(e){}
+  var sel=document.getElementById("cg");
+  sel.innerHTML=(info?info.congresses:[{congress:CG}]).map(function(x){return'<option value="'+x.congress+'"'+(x.congress===CG?" selected":"")+'>'+Site.ordinal(x.congress)+" Congress</option>"}).join("");
+  sel.onchange=function(){CG=parseInt(sel.value,10);history.replaceState(null,"","?congress="+CG);load()};
+  views();
+  document.getElementById("find").oninput=async function(){SHOW=40;if(this.value.trim()&&!ALL)await loadAll();draw()};
+  document.getElementById("more").onclick=function(){SHOW+=40;draw()};
+  load();
+})();
+</script>
+</body>
+</html>

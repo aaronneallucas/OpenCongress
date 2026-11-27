@@ -45,6 +45,7 @@ h1 .pill{font-size:15px;vertical-align:middle;margin-left:8px}
 <div id="nav"></div>
 <h1 id="h1"><span id="ht">Vote Map</span><span class="pill" id="tr" style="display:none"></span></h1>
 <p class="sub" id="bill"></p>
+<p id="ctx" style="font-size:17px;margin:4px 0 10px;max-width:900px"></p>
 <p class="small" id="ttl" style="margin:0 0 4px"></p>
 <p class="small" id="links"></p>
 
@@ -372,6 +373,7 @@ async function go(){
     stat("Loading…");
     var j=await Site.json(INDEX[i].file);
     load(j);showLinks(j);stat("");youBox(k);
+    Site.bills(j.congress||k.cg).then(function(T){var c=Site.context(j,T);var el=document.getElementById("ctx");el.textContent=c;el.style.display=c?"":"none"});
   }catch(e){stat("Could not load that vote ("+e.message+")")}}
 (async function(){
   Site.nav("votes");

@@ -57,7 +57,7 @@ async function card(ch, cg) {
   try {
     var idx = await Site.json("data/" + ch + "/" + cg + "/index.json"), v = newest(idx);
     if (!v) throw new Error("none");
-    var rp = Site.resultPill(v.result);
+    var rp = Site.resultPill(v.result), TB = await Site.bills(cg);
     if (!("dY" in v) && v.file) {
       /* older saved votes without party counts: work them out from the vote's own file */
       try {
@@ -78,6 +78,7 @@ async function card(ch, cg) {
     html += '<div class="vt"><a href="' + Site.voteHref(ch, cg, v.session, v.roll) + '">' + esc(Site.voteTitle(v)) + "</a>" +
       (rp && rp.known ? '<span class="pill ' + rp.c + '">' + rp.text.charAt(0) + rp.text.slice(1).toLowerCase() + "</span>" : "") + "</div>" +
       '<p class="m">' + sub.filter(Boolean).map(esc).join(" · ") + "</p>" +
+      (Site.context(v, TB) ? '<p class="m" style="color:var(--fg)">' + esc(Site.clip(Site.context(v, TB), 160)) + "</p>" : "") +
       Site.tallyHTML(v) +
       ("present" in v ? '<div class="x">Present ' + v.present + " · Not voting " + v.notVoting + "</div>" : "") +
       (v.title && v.title !== v.question ? '<div class="x">' + esc(v.title) + "</div>" : "");

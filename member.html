@@ -44,7 +44,7 @@
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var esc=Site.esc,R=null,DIR=null,ME=null,CG=119,CH="house",MX=null,IDX={},VROWS=[],vfilter="all",shown=100,LEG=null;
+var esc=Site.esc,R=null,DIR=null,ME=null,CG=119,CH="house",MX=null,IDX={},VROWS=[],vfilter="all",shown=100,LEG=null,TB={};
 
 function count(s,chars){var n=0;for(var i=0;i<s.length;i++)if(chars.indexOf(s[i])>-1)n++;return n}
 function pctText(n,d){return d?(100*n/d).toFixed(1)+"%":"—"}
@@ -79,7 +79,7 @@ function drawVotes(){
     if("yn".indexOf(r.code)>-1)rel="With party";
     if("YN".indexOf(r.code)>-1)rel='<b>Against party</b>';
     return"<tr><td>"+esc(Site.fmtDate(v.date))+'</td><td><a href="'+Site.voteHref(CH,CG,v.session,v.roll)+'">Roll '+v.roll+"</a></td><td>"+
-      (v.bill?"<b>"+esc(v.bill)+"</b> · ":"")+esc(v.question||"")+(v.title&&v.title!==v.question?'<div class="small" style="margin:0">'+esc(v.title)+"</div>":"")+"</td><td>"+esc(v.result||"")+
+      (v.bill?"<b>"+esc(v.bill)+"</b> · ":"")+esc(v.question||"")+(Site.context(v,TB)?'<div class="small" style="margin:0">'+esc(Site.clip(Site.context(v,TB),150))+"</div>":"")+(v.title&&v.title!==v.question?'<div class="small" style="margin:0">'+esc(v.title)+"</div>":"")+"</td><td>"+esc(v.result||"")+
       '</td><td class="'+l[1]+'"><b>'+l[0]+"</b></td><td>"+rel+"</td><td>"+(mp?mp:"—")+"</td></tr>"}).join("");
   document.getElementById("vc").textContent=rows.length+" of "+VROWS.length+" roll calls";
   document.getElementById("vmore").style.display=rows.length>shown?"inline-block":"none";}
@@ -133,7 +133,7 @@ async function loadCongress(){
   document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call. Maverick score adds, for each such vote, the number of party members who voted with the majority minus the number who voted against.";
   try{
     var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);
-    MX=r[0];IDX={};r[1].forEach(function(v){IDX[v.session+"-"+v.roll]=v});
+    TB=await Site.bills(CG);MX=r[0];IDX={};r[1].forEach(function(v){IDX[v.session+"-"+v.roll]=v});
   }catch(e){document.getElementById("cards").textContent="Voting data is not available yet ("+e.message+").";return}
   s=MX.members[ME.id]||"";
   cards(s);

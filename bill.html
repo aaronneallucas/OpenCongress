@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bill — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<p class="small"><a id="back" href="bills.html">&larr; All bills</a></p>
+<h1 id="h1">Bill</h1>
+<p id="title" style="font-size:17px;max-width:900px"></p>
+<div class="cards" id="cards"></div>
+<p class="small" id="links"></p>
+<div class="panel"><h2>Roll call votes on this bill</h2><div id="votes"></div></div>
+<p class="foot">Data: Congress.gov and Senate.gov</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc;
+function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><div class="v" style="font-size:20px">'+v+'</div><div class="d">'+d+"</div></div>"}
+(async function(){
+  Site.nav("bills");
+  var q=Site.qs(),CG=parseInt(q.get("congress"),10),ty=(q.get("type")||"").toUpperCase(),n=parseInt(q.get("number"),10),key=ty+" "+n;
+  var label=Site.billLabel(key);
+  document.getElementById("h1").textContent=label+" — "+Site.ordinal(CG)+" Congress";document.title=label+" — Open Congress";
+  document.getElementById("back").href="bills.html?congress="+CG;
+  var meta=await Site.json("data/billlist/"+CG+"/meta.json").catch(function(){return null});
+  var rec=null;
+  if(meta){try{var rows=await Site.json("data/billlist/"+CG+"/"+ty+"-"+Math.floor((n-1)/(meta.chunk||2000))+".json");rec=rows.filter(function(r){return r.n===n})[0]||null}catch(e){}}
+  var r=await Promise.all([Site.bills(CG),Site.json("data/laws/"+CG+".json").catch(function(){return{laws:[]}}),Site.json("data/members/directory.json").catch(function(){return[]}),
+    Site.json("data/house/"+CG+"/index.json").catch(function(){return[]}),Site.json("data/senate/"+CG+"/index.json").catch(function(){return[]})]);
+  var T=r[0],law=r[1].laws.filter(function(l){return l.type===ty&&parseInt(l.number,10)===n})[0],DIR={};r[2].forEach(function(e){DIR[e.id]=e});
+  var title=(rec&&rec.t)||(T.bills[key]&&T.bills[key].t)||(law&&law.title)||"";
+  document.getElementById("title").textContent=title||"Title not collected yet.";
+  var cards=[],lw=(rec&&rec.l)||(law&&law.law);
+  if(rec&&rec.d)cards.push(card("Introduced",esc(Site.fmtDate(rec.d)),""));
+  if(rec&&rec.s&&DIR[rec.s]){var e=DIR[rec.s],c=e.c&&e.c[CG]||{};cards.push(card("Sponsor",'<a href="'+Site.memberHref(rec.s,CG)+'">'+esc(e.first+" "+e.last)+"</a>",esc((c.party||rec.sp)+(c.state?"-"+c.state:"")+(c.district?"-"+c.district:""))))}
+  if(rec){var tot=(rec.cd||0)+(rec.cr||0)+(rec.ci||0);
+    cards.push(card("Cosponsors",String(tot),tot?esc([rec.cd?rec.cd+" Democratic":"",rec.cr?rec.cr+" Republican":"",rec.ci?rec.ci+" other":""].filter(Boolean).join(" · "))+((rec.cd&&rec.cr)?" · <b>bipartisan</b>":""):"None collected"))}
+  cards.push(card("Signed into law",lw?'<span class="law" style="font-size:15px">Law '+esc(lw)+"</span>":"No",lw&&(rec&&rec.ld||law&&law.date)?esc(Site.fmtDate((rec&&rec.ld)||law.date)):"Not recorded as enacted"));
+  document.getElementById("cards").innerHTML=cards.join("");
+  var url=Site.billUrl(ty,n,CG);
+  document.getElementById("links").innerHTML=url?'<a href="'+url+'" target="_blank" rel="noopener">View '+esc(label)+" on Congress.gov</a>":"";
+  var votes=[];r[3].forEach(function(v){if(v.bill===key)votes.push(v)});r[4].forEach(function(v){if(v.bill===key)votes.push(v)});
+  votes.sort(function(a,b){return(b.date||"")<(a.date||"")?-1:1});
+  document.getElementById("votes").innerHTML=votes.map(function(v){var rp=Site.resultPill(v.result),ctx=Site.context(v,T);
+    return'<a class="row" href="'+Site.voteHref(v.chamber,CG,v.session,v.roll)+'"><div class="t"><b>'+esc(Site.chamberName(v.chamber))+" Roll Call "+v.roll+"</b> · "+esc(v.question||"")+(rp&&rp.known?' <span class="pill '+rp.c+'" style="font-size:11px;padding:1px 8px">'+esc(rp.text)+"</span>":"")+"</div>"+
+      (v.amendment?'<div class="tt">'+esc(Site.clip(ctx,200))+"</div>":"")+'<div class="m">'+esc(Site.fmtDate(v.date))+(v.yes!=null?" · Yes "+v.yes+" · No "+v.no:"")+"</div></a>"}).join("")||'<p class="small">No roll call votes on this bill have been saved.</p>';
+})();
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ Environment variables:
   CONGRESS_API_KEY   (required)
   CONGRESSES         e.g. "118,119". Default: the current Congress, plus the previous one until 21 days after the new Congress begins.
   MAX_NEW            max new votes saved per chamber and Congress per run (default 400)
+  TITLE_BUDGET       Max API requests for bill/amendment titles per run.
   LEG_BUDGET         max API requests spent on bills per run (default 1200)
   LEG_REFRESH_DAYS   re-fetch a member's bills after this many days (default 5)
   OUT_DIR            default "data"
@@ -663,6 +664,19 @@ def write_congresses():
 
 
 # ---------------------------------------------------------------- sponsored / cosponsored legislation
+
+def tracked_congresses(cgs):
+    """Congresses worth keeping bill data for: those being updated this run plus every Congress already on the site."""
+    keep = set(cgs)
+    j = load_json(os.path.join(OUT, "congresses.json"), None) or {}
+    for x in j.get("congresses", []):
+        try:
+            keep.add(int(x["congress"]))
+        except (KeyError, ValueError, TypeError):
+            pass
+    return sorted(keep)
+
+
 def update_legislation(dirmap, cgs, budget, refresh_days):
     if budget <= 0:
         return
@@ -672,7 +686,8 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
 
     def key(e):
         d = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
-        return ((d or {}).get("updated", ""), latest not in e["c"])
+        covered = bool(d) and set(c for c in cgs if str(c) in e["c"]) <= set(d.get("tracked", []))
+        return (covered, (d or {}).get("updated", ""), latest not in e["c"])
 
     ids.sort(key=key)
 
@@ -680,6 +695,8 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
         old = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
         if not old:
             return False
+        if not set(c for c in cgs if str(c) in e["c"]) <= set(old.get("tracked", [])):
+            return False  # this file was saved before one of the member's Congresses was being tracked
         try:
             return (today - datetime.date.fromisoformat(old.get("updated", "1970-01-01"))).days < refresh_days
         except ValueError:
@@ -696,7 +713,9 @@ def update_legislation(dirmap, cgs, budget, refresh_days):
             log("  Legislation: request budget reached (%d); the remaining %d member(s) will be refreshed on later runs." % (budget, len(todo) - done))
             break
         f = os.path.join(OUT, "legislation", e["id"] + ".json")
-        data = {"updated": today.isoformat(), "congresses": {}}
+        prev = load_json(f, None) or {}
+        data = {"updated": today.isoformat(), "tracked": sorted(cgs),
+                "congresses": {k: v for k, v in (prev.get("congresses") or {}).items() if int(k) not in cgs}}
         try:
             for kind, k in (("sponsored", "sponsoredLegislation"), ("cosponsored", "cosponsoredLegislation")):
                 items, _ = paged("/member/%s/%s-legislation" % (e["id"], kind),
@@ -747,12 +766,148 @@ def apply_counts(dirmap, cgs):
             c["cosponsored"] = len(slot["cosponsored"]) if slot else 0
             n += 1
     log("Legislation counts saved for %d member/Congress pair(s)." % n)
+# ---------------------------------------------------------------- bill lists (built from members' sponsored/cosponsored files)
+BILLTITLES = {}
+CHUNK = 2000
+
+
+def pcode_of(p):
+    p = (p or "").upper()
+    return p if p in ("D", "R") else "I"
+
+
+def build_bills(dirmap, cgs):
+    """data/billlist/{cg}/: every bill any tracked member sponsored, with cosponsor counts by party.
+    recent.json (newest 400), {TYPE}-{k}.json chunks of 2000 bill numbers, and meta.json."""
+    for cg in cgs:
+        bills, cos = {}, {}
+        for e in dirmap.values():
+            c = e["c"].get(str(cg))
+            if c is None:
+                continue
+            d = load_json(os.path.join(OUT, "legislation", e["id"] + ".json"), None)
+            slot = ((d or {}).get("congresses") or {}).get(str(cg))
+            if not slot:
+                continue
+            p = pcode_of(c.get("party") or e.get("party"))
+            for x in slot.get("sponsored", []):
+                if not x.get("type") or not str(x.get("number") or "").isdigit():
+                    continue
+                key = x["type"] + " " + str(x["number"])
+                r = {"y": x["type"], "n": int(x["number"]), "t": x.get("title") or "", "d": x.get("date") or "", "s": e["id"], "sp": p}
+                if x.get("law"):
+                    r["l"] = x["law"]
+                    r["ld"] = x.get("lawDate") or ""
+                bills[key] = r
+            for x in slot.get("cosponsored", []):
+                key = (x.get("type") or "") + " " + str(x.get("number"))
+                cc = cos.setdefault(key, [0, 0, 0])
+                cc[{"D": 0, "R": 1}.get(p, 2)] += 1
+        for key, cc in cos.items():
+            r = bills.get(key)
+            if r:
+                for i, nm in enumerate(("cd", "cr", "ci")):
+                    if cc[i]:
+                        r[nm] = cc[i]
+        BILLTITLES[cg] = {k: r["t"] for k, r in bills.items() if r["t"]}
+        base = os.path.join(OUT, "billlist", str(cg))
+        groups = {}
+        for r in bills.values():
+            groups.setdefault((r["y"], (r["n"] - 1) // CHUNK), []).append(r)
+        chunks = {}
+        for (ty, k), rows in groups.items():
+            rows.sort(key=lambda r: r["n"])
+            save_json(os.path.join(base, "%s-%d.json" % (ty, k)), rows)
+            chunks.setdefault(ty, []).append(k)
+        recent = sorted(bills.values(), key=lambda r: (r["d"], r["n"]), reverse=True)[:400]
+        save_json(os.path.join(base, "recent.json"), recent)
+        expected = None
+        j = get("/bill/%d" % cg, limit=1)
+        if j:
+            expected = (j.get("pagination") or {}).get("count")
+        save_json(os.path.join(base, "meta.json"), {
+            "updated": datetime.date.today().isoformat(), "total": len(bills), "expected": expected,
+            "chunks": {k: sorted(v) for k, v in chunks.items()}, "chunk": CHUNK})
+        note("Bill list: Congress %d has %d bill(s) collected%s" % (cg, len(bills), " of %s" % expected if expected else ""))
+
+
+
+# ---------------------------------------------------------------- bill and amendment titles
+def split_bill(key):
+    m = re.match(r"^([A-Za-z]+)\s+(\d[\w\-]*)$", (key or "").strip())
+    return (m.group(1).lower(), m.group(2)) if m else (None, None)
+
+
+def update_titles(cgs, budget):
+    """data/bills/{cg}.json: title of every bill and the purpose of every amendment that a saved roll call refers to.
+    Newest votes first; only items not already cached are requested (up to `budget` requests)."""
+    if budget <= 0:
+        note("Titles skipped (TITLE_BUDGET is 0)")
+        return
+    left = budget
+    for cg in cgs:
+        path = os.path.join(OUT, "bills", "%d.json" % cg)
+        cache = load_json(path, {"bills": {}, "amendments": {}})
+        cache.setdefault("bills", {})
+        cache.setdefault("amendments", {})
+        for k, t in (BILLTITLES.get(cg) or {}).items():
+            if k not in cache["bills"] or not cache["bills"][k].get("t"):
+                cache["bills"][k] = {"t": t[:400]}
+        want_b, want_a = [], []
+        for ch in ("house", "senate"):
+            idx = load_json(os.path.join(OUT, ch, str(cg), "index.json"), [])
+            for v in sorted(idx, key=lambda x: (x.get("date") or ""), reverse=True):
+                b, a = (v.get("bill") or "").strip(), (v.get("amendment") or "").strip()
+                if b and b not in cache["bills"] and b not in want_b:
+                    want_b.append(b)
+                if a and a not in cache["amendments"] and a not in want_a:
+                    want_a.append(a)
+        got = 0
+        for key in want_a:
+            if left <= 0:
+                break
+            t, n = split_bill(key)
+            if not t:
+                cache["amendments"][key] = {}
+                continue
+            left -= 1
+            j = get("/amendment/%d/%s/%s" % (cg, t, n))
+            am = (j or {}).get("amendment") or {}
+            ab = am.get("amendedBill") or {}
+            if j is None:
+                cache["amendments"][key] = {}
+            else:
+                cache["amendments"][key] = {"p": (am.get("purpose") or am.get("description") or "")[:400],
+                                            "to": ((ab.get("type") or "") + " " + str(ab.get("number") or "")).strip(),
+                                            "tt": (ab.get("title") or "")[:300]}
+            got += 1
+        for key in want_b:
+            if left <= 0:
+                break
+            t, n = split_bill(key)
+            if not t:
+                cache["bills"][key] = {}
+                continue
+            left -= 1
+            j = get("/bill/%d/%s/%s" % (cg, t, n))
+            if j is None:
+                cache["bills"][key] = {}
+            else:
+                cache["bills"][key] = {"t": ((j.get("bill") or {}).get("title") or "")[:400]}
+            got += 1
+        save_json(path, cache)
+        remaining = len([k for k in want_b if k not in cache["bills"]]) + len([k for k in want_a if k not in cache["amendments"]])
+        note("Titles: Congress %d, %d looked up this run, %d still to look up" % (cg, got, remaining))
+
 
 
 # ---------------------------------------------------------------- bills signed into law
-def update_laws(cgs):
-    """data/laws/{cg}.json: every public and private law of the Congress, from the Congress.gov law endpoint."""
+def update_laws(cgs, run_cgs=None):
+    """data/laws/{cg}.json: every public and private law of the Congress, from the Congress.gov law endpoint.
+    Congresses outside this run are only fetched when they have no laws file yet."""
     for cg in cgs:
+        if run_cgs is not None and cg not in run_cgs and os.path.exists(os.path.join(OUT, "laws", "%d.json" % cg)):
+            continue
         laws = []
         for kind in ("pub", "priv"):
             try:
@@ -796,6 +951,7 @@ def main():
     cgs = sorted(int(x) for x in env.split(",") if x.strip()) if env else default_congresses()
     max_new = int(os.environ.get("MAX_NEW", "400"))
     leg_budget = int(os.environ.get("LEG_BUDGET", "1200"))
+    title_budget = int(os.environ.get("TITLE_BUDGET", "600"))
     dpath = os.path.join(OUT, "members", "directory.json")
     dirmap = {e["id"]: e for e in load_json(dpath, [])}
 
@@ -807,6 +963,8 @@ def main():
     plan.append("Save the member directory and the list of Congresses")
     plan.append("Sponsored and cosponsored bills for members (up to %d requests)" % leg_budget if leg_budget > 0 else
                 "Sponsored and cosponsored bills (skipped: LEG_BUDGET is 0)")
+    plan.append("Bill lists for the Bills tab (built from the sponsored/cosponsored files, 1 request per Congress)")
+    plan.append("Bill and amendment titles for the votes (up to %d requests)" % title_budget)
     plan.append("Bills signed into law (public and private laws) for each Congress")
     plan.append("Save sponsored/cosponsored counts and the data status")
     STEP["of"] = len(plan)
@@ -827,12 +985,18 @@ def main():
     save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))
     write_congresses()
     log("Saved %d member(s)." % len(dirmap))
+    keep = tracked_congresses(cgs)
+    log("Bill data is kept for Congress(es): %s (this run updates %s)." % (", ".join(map(str, keep)), ", ".join(map(str, cgs))))
     step("Sponsored and cosponsored bills")
-    update_legislation(dirmap, cgs, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    update_legislation(dirmap, keep, leg_budget, int(os.environ.get("LEG_REFRESH_DAYS", "5")))
+    step("Bill lists")
+    build_bills(dirmap, keep)
+    step("Bill and amendment titles")
+    update_titles(keep, title_budget)
     step("Bills signed into law")
-    update_laws(cgs)
+    update_laws(keep, cgs)
     step("Saving legislation counts and status")
-    apply_counts(dirmap, cgs)
+    apply_counts(dirmap, keep)
     save_json(dpath, sorted(dirmap.values(), key=lambda e: ((e.get("last") or "").lower(), (e.get("first") or "").lower())))
     write_status(cgs)
     log("")
