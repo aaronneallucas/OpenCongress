@@ -86,6 +86,8 @@
     host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Open Congress</a>' +
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
       '<div class="tab' + (active === "bills" ? " on" : "") + '"><button type="button" data-href="bills.html">Bills</button></div>' +
+      '<div class="tab' + (active === "nominations" ? " on" : "") + '"><button type="button" data-href="nominations.html">Nominations</button></div>' +
+      '<div class="tab' + (active === "hearings" ? " on" : "") + '"><button type="button" data-href="hearings.html">Hearings</button></div>' +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
       '<div class="tab' + (active === "compare" ? " on" : "") + '"><button type="button" data-href="compare.html">Compare</button></div>' +
       '<div class="tab' + (active === "data" ? " on" : "") + '"><button type="button" data-href="data.html">Data</button></div>' +
@@ -161,6 +163,47 @@
       var m = el.querySelector("[data-more]"); if (m) m.onclick = function () { o.onMore(); };
       el.querySelector("select[data-s]").onchange = function () { o.onSize(parseInt(this.value, 10)); };
     });
+  };
+  /* ---------- presidential nominations ---------- */
+  Site.NOM_CATS = [["judicial", "Judges"], ["ambassador", "Ambassadors and diplomats"], ["law", "U.S. Attorneys and Marshals"],
+    ["dept", "Department leadership"], ["agency", "Boards, commissions and agencies"], ["other", "Other civilian"]];
+  Site.nomCat = function (r) {
+    if (r.m) return "military";
+    var t = (r.d || "") + " " + (r.o || "");
+    if (/\bJudge\b|Court of (Appeals|International Trade|Federal Claims|Veterans)|Circuit|Tax Court/i.test(t)) return "judicial";
+    if (/Ambassador|Chief of Mission|Consul/i.test(t)) return "ambassador";
+    if (/United States Attorney|United States Marshal|Marshal for the/i.test(t)) return "law";
+    if (/Secretary of|Under Secretary|Assistant Secretary|Deputy Secretary|General Counsel|Inspector General|Chief Financial Officer|Solicitor/i.test(t)) return "dept";
+    if (/Commission|Board|Corporation|Authority|Federal Reserve|Council|Foundation|Institute|Administrator|Director|Postal|Agency|Service/i.test(t)) return "agency";
+    return "other";
+  };
+  /* outcome from the text of the latest action: {k: confirmed|withdrawn|returned|rejected|acted|pending, date, yea, nay, roll, voice} */
+  Site.nomStatus = function (r) {
+    var t = r.t || "", o = {k: "pending", date: r.a || ""};
+    if (/^Confirmed by the Senate/i.test(t)) {
+      o.k = "confirmed";
+      var v = t.match(/(\d+)\s*-\s*(\d+)/), rv = t.match(/Record Vote Number:\s*(\d+)/);
+      if (v) { o.yea = +v[1]; o.nay = +v[2]; }
+      if (rv) o.roll = +rv[1];
+      o.voice = /voice vote|unanimous consent/i.test(t);
+    } else if (/^Withdrawn/i.test(t)) o.k = "withdrawn";
+    else if (/^Returned to the President/i.test(t)) o.k = "returned";
+    else if (/^(Rejected|Failed)/i.test(t)) o.k = "rejected";
+    else if (/^Message on Senate action/i.test(t)) o.k = "acted";
+    return o;
+  };
+  Site.NOM_STATUS = {confirmed: ["Confirmed", "y"], withdrawn: ["Withdrawn", "g"], returned: ["Returned to the President", "g"],
+    rejected: ["Rejected", "n"], acted: ["Senate acted (outcome not in latest action)", "g"], pending: ["Pending", "p"]};
+  Site.nomUrl = function (cg, n) { return "https://www.congress.gov/nomination/" + Site.ordinal(cg).toLowerCase() + "-congress/" + n; };
+  Site.eventUrl = function (cg, ch, id) { return "https://www.congress.gov/event/" + Site.ordinal(cg).toLowerCase() + "-congress/" + ch + "-event/" + id; };
+  /* small download helpers (CSV opens cleanly in Excel; cells that start with = + - @ are neutralized) */
+  function csvCell(v) { v = String(v == null ? "" : v); if (/^[=+\-@]/.test(v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  Site.csv = function (head, rows) { return "\ufeff" + [head].concat(rows).map(function (r) { return r.map(csvCell).join(","); }).join("\r\n") + "\r\n"; };
+  Site.saveFile = function (name, text, type) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], {type: (type || "text/csv") + ";charset=utf-8"}));
+    a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   };
   Site.clip = function (s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "\u2026" : s; };
   Site.voteTitle = function (j) {
@@ -244,6 +287,17 @@
     var pts = [[0, 0]];
     days.forEach(function (d, i) { pts.push([d, i + 1]); });
     return {pts: pts, total: days.length, last: days.length ? days[days.length - 1] : 0};
+  };
+  /* the same, from a {date: count} map */
+  Site.cumulativeCounts = function (map, cg) {
+    var start = Site.congressStart(cg), pts = [[0, 0]], tot = 0, last = 0;
+    Object.keys(map || {}).sort().forEach(function (k) {
+      var t = Date.parse(k);
+      if (isNaN(t)) return;
+      var d = Math.max(0, Math.round((t - start) / 86400000));
+      tot += map[k]; last = d; pts.push([d, tot]);
+    });
+    return {pts: pts, total: tot, last: last};
   };
   Site.countAt = function (c, day) {
     var n = 0;

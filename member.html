@@ -15,6 +15,7 @@
 <div class="panel cnt" id="contact" style="display:none"><h2>Contact</h2><dl id="cdl"></dl></div>
 <div class="cards" id="cards"></div>
 <p class="small" id="note"></p>
+<p class="small" id="dlrow" style="display:none"><b>Download this member’s data:</b> <button type="button" id="dlv">Votes (CSV)</button> <button type="button" id="dlb">Sponsored and cosponsored bills (CSV)</button> <button type="button" id="dlj">Everything (JSON)</button></p>
 
 <div class="ptabs" id="ptabs">
   <button data-t="votes" class="on">Voting record</button>
@@ -123,6 +124,23 @@ document.getElementById("ptabs").addEventListener("click",function(e){if(e.targe
 document.getElementById("vq").oninput=function(){shown=100;drawVotes()};
 document.getElementById("vmore").onclick=function(){shown+=100;drawVotes()};
 
+function fname(x){return(ME.last+"-"+ME.first+"-"+CG+"-"+x).replace(/[^A-Za-z0-9\-]+/g,"_")}
+var VOTE_WORD={y:"Yes",Y:"Yes",a:"Yes",n:"No",N:"No",b:"No",p:"Present",m:"Not voting"};
+function wireDownloads(){
+  document.getElementById("dlrow").style.display="";
+  document.getElementById("dlv").onclick=function(){
+    Site.saveFile(fname("votes")+".csv",Site.csv(["Date","Chamber","Session","Roll","Bill","Question","Description","Result","Member voted","Relation to own party"],
+      VROWS.map(function(r){var v=r.v,c=r.code;return[v.date,CH,v.session,v.roll,v.bill,v.question,Site.context(v,TB)||v.title||"",v.result,VOTE_WORD[c]||c,c==="Y"||c==="N"?"Against party":c==="y"||c==="n"?"With party":(c==="a"||c==="b")?"No party majority":""]})))};
+  document.getElementById("dlb").onclick=function(){
+    var s=LEG&&LEG.congresses&&LEG.congresses[CG],rows=[];
+    if(s)["sponsored","cosponsored"].forEach(function(k){(s[k]||[]).forEach(function(b){rows.push([k==="sponsored"?"Sponsored":"Cosponsored",b.type,b.number,b.title,b.date,b.law||""])})});
+    Site.saveFile(fname("bills")+".csv",Site.csv(["Role","Bill type","Number","Title","Introduced (sponsored) or cosponsored on","Law"],rows))};
+  document.getElementById("dlj").onclick=function(){
+    var c=ME.c[CG];
+    Site.saveFile(fname("all")+".json",JSON.stringify({member:{id:ME.id,first:ME.first,last:ME.last,congress:CG,chamber:CH,party:c.party,state:c.state,district:c.district,stats:c},
+      votes:VROWS.map(function(r){return{date:r.v.date,session:r.v.session,roll:r.v.roll,bill:r.v.bill,question:r.v.question,result:r.v.result,code:r.code}}),
+      sponsored:(LEG&&LEG.congresses&&LEG.congresses[CG]||{}).sponsored||[],cosponsored:(LEG&&LEG.congresses&&LEG.congresses[CG]||{}).cosponsored||[]},null,1),"application/json")};
+}
 var CONTACT=null;
 async function drawContact(){
   var box=document.getElementById("contact");box.style.display="none";
@@ -164,7 +182,7 @@ async function loadCongress(){
   VROWS=[];
   MX.votes.forEach(function(sr,i){var code=s[i],v=IDX[sr[0]+"-"+sr[1]];if(code&&code!=="-"&&v)VROWS.push({v:v,code:code})});
   VROWS.sort(function(a,b){return(b.v.date||"")<(a.v.date||"")?-1:(b.v.date||"")>(a.v.date||"")?1:(b.v.session-a.v.session)||(b.v.roll-a.v.roll)});
-  shown=100;drawVotes();
+  shown=100;drawVotes();wireDownloads();
   try{LEG=await Site.json("data/legislation/"+encodeURIComponent(ME.id)+".json")}catch(e){LEG=null}
   drawBills("sponsored","sl","sh");drawBills("cosponsored","cl","ch");
   document.getElementById("ptabs").children[1].textContent="Sponsored"+(LEG&&LEG.congresses&&LEG.congresses[CG]?" ("+LEG.congresses[CG].sponsored.length+")":"");

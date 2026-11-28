@@ -23,9 +23,22 @@
   <p class="small">CSV files are generated in your browser from the saved JSON. The vote matrix is the grid behind the relationships map: one row per member, one character per roll call (y/n with the party, Y/N against it, a/b no party majority, p present, m not voting, - not on the roll call).</p>
 </div>
 
+<div class="panel" id="bulk"><h2>Download everything</h2>
+  <p id="bulkp">Loading…</p>
+  <p class="small">The ZIP is the whole repository as GitHub builds it, so it holds every file in the <code>data</code> folder (votes, members, bills, summaries, nominations, hearings, contact details) along with the site’s pages.</p>
+</div>
+
+<div class="panel"><h2>Bills, nominations and hearings</h2>
+  <div class="tblwrap"><table class="tbl"><thead><tr><th>Congress</th><th>Bills collected</th><th>Summaries</th><th>Nominations</th><th>Meetings and hearings</th><th>Downloads</th></tr></thead><tbody id="more"></tbody></table></div>
+  <p class="small">Bills are gathered from members’ sponsored and cosponsored lists, so “collected” can be below the Congress’s real total while it is being backfilled. Sponsors and cosponsors (with dates), laws and committee meetings fill in over several updates. A finished Congress shows <b>final</b> once its data can no longer change.</p>
+  <p class="small">Per member files: <code>data/legislation/&lt;member id&gt;.json</code>. Member contact details: <a href="data/members/contact.json">contact.json</a>. Member list: <a href="data/members/directory.json">directory.json</a>.</p>
+</div>
+
 <div class="panel src"><h2>Sources</h2>
   <ul>
     <li><a href="https://www.congress.gov/" target="_blank" rel="noopener">Congress.gov</a> and its <a href="https://api.congress.gov/" target="_blank" rel="noopener">API</a> (Library of Congress): House roll call votes, members, sponsored and cosponsored bills, and laws.</li>
+    <li>Congress.gov API: also nominations (by Congress) and committee meetings and hearings.</li>
+    <li><a href="https://github.com/unitedstates/congress-legislators" target="_blank" rel="noopener">congress-legislators</a>: members’ official websites, phone numbers, contact forms and social accounts.</li>
     <li><a href="https://www.senate.gov/legislative/votes.htm" target="_blank" rel="noopener">Senate.gov roll call votes</a>: Senate votes, published as XML.</li>
   </ul>
   <p class="small">Statistics (missed votes, votes against party, Maverick score, rankings) are calculated by this site from those records. The methods are described at the bottom of the Members pages.</p>
@@ -39,6 +52,14 @@ function csvCell(v){v=String(v==null?"":v);if(/^[=+\-@]/.test(v))v="'"+v;return 
 function csv(head,rows){return"﻿"+[head].concat(rows).map(function(r){return r.map(csvCell).join(",")}).join("\r\n")+"\r\n"}
 function save(name,text){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/csv;charset=utf-8"}));a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500)}
 var DIR=null;
+/* A finished Congress is Final once its saved votes run from near the start to near the end; otherwise it is still being backfilled. */
+function latestCell(cg,live,idx,last){
+  if(live)return last?Site.fmtDate(last):"—";
+  var start=Site.congressStart(cg),end=Date.UTC(1789+2*cg,0,3),dates=idx.map(function(v){return Date.parse(v.date)}).filter(function(t){return!isNaN(t)});
+  if(!dates.length)return'<span class="pill g" style="font-size:11px;padding:1px 8px">Backfilling</span>';
+  var lo=Math.min.apply(null,dates),hi=Math.max.apply(null,dates),ok=(lo-start)/864e5<=45&&(end-hi)/864e5<=60&&Date.now()>end;
+  return(ok?'<span class="pill y" style="font-size:11px;padding:1px 8px">Final</span>':'<span class="pill p" style="font-size:11px;padding:1px 8px">Backfilling</span>')+' <span class="small">'+(last?"last vote "+esc(Site.fmtDate(last)):"")+"</span>";
+}
 window.dlVotes=async function(ch,cg){var idx=await Site.json("data/"+ch+"/"+cg+"/index.json"),TB=await Site.bills(cg);
   save(ch+"-"+cg+"-votes.csv",csv(["Session","Roll","Date","Bill","Amendment","Title","Question","Result","Dem Yes","Dem No","Rep Yes","Rep No","Ind Yes","Ind No"],
     idx.map(function(v){return[v.session,v.roll,v.date,v.bill,v.amendment,Site.context(v,TB),v.question,v.result,v.dY,v.dN,v.rY,v.rN,v.iY,v.iN]})))};
@@ -46,6 +67,16 @@ window.dlMembers=function(ch,cg){
   save(ch+"-"+cg+"-members.csv",csv(["Member ID","Last","First","Party","State","District","Votes","Missed","Present","Against party","Party votes","Maverick score","Sponsored","Cosponsored"],
     DIR.filter(function(e){var s=e.c&&e.c[cg];return s&&s.chamber===ch}).map(function(e){var s=e.c[cg];
       return[e.id,e.last,e.first,s.party,s.state,s.district,s.eligible,s.missed,s.present,s.against,s.partyVotes,s.maverick,s.sponsored,s.cosponsored]})))};
+window.dlNoms=async function(cg){var j=await Site.json("data/nominations/"+cg+".json");
+  save("nominations-"+cg+".csv",csv(["PN","Description","Organization","Received","Status","Status date","Subject group","Military","Latest action"],
+    j.items.map(function(r){var st=Site.nomStatus(r);return["PN"+r.n,r.d,r.o,r.r,st.k,st.date,Site.nomCat(r),r.m?"yes":"",r.t]})))};
+window.dlMeet=async function(cg){var j=await Site.json("data/hearings/"+cg+".json");
+  save("meetings-"+cg+".csv",csv(["Event id","Chamber","Type","Status","Date and time (UTC)","Title","Committees","Location","Witnesses","Related bills"],
+    j.meetings.filter(function(m){return!m.x}).map(function(m){return[m.id,m.ch,m.ty,m.st,m.dt,m.ti,(m.com||[]).map(function(c){return c.n}).join("; "),m.wh,m.nw,(m.b||[]).map(function(b){return String(b.t).toUpperCase()+b.n}).join("; ")]})))};
+window.dlBills=async function(cg){var meta=await Site.json("data/billlist/"+cg+"/meta.json"),rows=[];
+  for(var ty of Object.keys(meta.chunks))for(var k of meta.chunks[ty]){try{rows=rows.concat(await Site.json("data/billlist/"+cg+"/"+ty+"-"+k+".json"))}catch(e){}}
+  save("bills-"+cg+".csv",csv(["Type","Number","Title","Introduced","Sponsor id","Sponsor party","Democratic cosponsors","Republican cosponsors","Other cosponsors","Law","Summary snippet"],
+    rows.map(function(r){return[r.y,r.n,r.t,r.d,r.s,r.sp,r.cd,r.cr,r.ci,r.l,r.m]})))};
 window.dlLaws=async function(cg){var j=await Site.json("data/laws/"+cg+".json");
   save("laws-"+cg+".csv",csv(["Law","Kind","Bill type","Bill number","Title","Date"],j.laws.map(function(l){return[l.law,l.kind,l.type,l.number,l.title,l.date]})))};
 (async function(){
@@ -64,7 +95,7 @@ window.dlLaws=async function(cg){var j=await Site.json("data/laws/"+cg+".json");
       var mem=DIR.filter(function(e){var s=e.c&&e.c[x.congress];return s&&s.chamber===ch&&s.eligible>0});
       var withB=mem.filter(function(e){return e.c[x.congress].sponsored!=null}).length;
       var last=idx.reduce(function(m,v){return v.date&&v.date>m?v.date:m},"");
-      cov+="<tr><td>"+Site.ordinal(x.congress)+"</td><td>"+Site.chamberName(ch)+'</td><td class="num">'+idx.length+"</td><td>"+(last?Site.fmtDate(last):"—")+'</td><td class="num">'+mem.length+'</td><td class="num">'+withB+"</td></tr>";
+      cov+="<tr><td>"+Site.ordinal(x.congress)+"</td><td>"+Site.chamberName(ch)+'</td><td class="num">'+idx.length+"</td><td>"+latestCell(x.congress,x.congress===info.latest,idx,last)+'</td><td class="num">'+mem.length+'</td><td class="num">'+withB+"</td></tr>";
       dl+="<tr><td>"+Site.ordinal(x.congress)+"</td><td>"+Site.chamberName(ch)+'</td><td class="dlb"><button onclick="dlVotes(\''+ch+"',"+x.congress+')">CSV</button></td>'+
         '<td class="dlb"><button onclick="dlMembers(\''+ch+"',"+x.congress+')">CSV</button></td>'+
         '<td class="dlb">'+(ch==="house"&&hasLaws?'<button onclick="dlLaws('+x.congress+')">CSV</button>':ch==="house"?"—":"")+"</td>"+
@@ -72,6 +103,20 @@ window.dlLaws=async function(cg){var j=await Site.json("data/laws/"+cg+".json");
     }
   }
   document.getElementById("cov").innerHTML=cov;document.getElementById("dl").innerHTML=dl;
+  var host=location.hostname,m=host.match(/^([^.]+)\.github\.io$/),repo=location.pathname.split("/")[1];
+  document.getElementById("bulkp").innerHTML=m&&repo?'<a href="https://github.com/'+esc(m[1])+"/"+esc(repo)+'/archive/refs/heads/main.zip"><button type="button">Download all data (ZIP)</button></a> <a href="https://github.com/'+esc(m[1])+"/"+esc(repo)+'">Open the repository on GitHub</a>':"Open the repository on GitHub and choose Code, then Download ZIP, to get every data file at once.";
+  var more="";
+  for(var x of info.congresses){
+    var bm=null,nm=null,hm=null,sm=null;
+    try{bm=await Site.json("data/billlist/"+x.congress+"/meta.json")}catch(e){}
+    try{nm=await Site.json("data/nominations/"+x.congress+".json")}catch(e){}
+    try{hm=await Site.json("data/hearings/"+x.congress+".json")}catch(e){}
+    try{sm=await Site.json("data/summaries/"+x.congress+"/meta.json")}catch(e){}
+    function tag(o){return o&&o.final?' <span class="pill y" style="font-size:11px;padding:1px 8px">final</span>':o?' <span class="small">'+(o.complete===false?"backfilling":"")+"</span>":""}
+    more+="<tr><td><b>"+Site.ordinal(x.congress)+"</b></td><td>"+(bm?bm.total.toLocaleString()+(bm.expected?" of "+bm.expected.toLocaleString():""):"—")+"</td><td>"+(sm?(sm.final?"final":sm.complete?"up to date":"backfilling"):"—")+"</td><td>"+(nm?nm.items.length.toLocaleString()+tag(nm):"—")+"</td><td>"+(hm?hm.meetings.filter(function(q){return!q.x}).length.toLocaleString()+tag(hm):"—")+"</td>"+
+      '<td class="dlb">'+(bm?'<button onclick="dlBills('+x.congress+')">Bills CSV</button>':"")+(nm?'<button onclick="dlNoms('+x.congress+')">Nominations CSV</button>':"")+(hm?'<button onclick="dlMeet('+x.congress+')">Meetings CSV</button>':"")+"</td></tr>";
+  }
+  document.getElementById("more").innerHTML=more||"<tr><td colspan=6>No data yet.</td></tr>";
 })();
 </script>
 </body>

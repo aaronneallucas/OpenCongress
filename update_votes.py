@@ -976,6 +976,11 @@ def build_bills(dirmap, cgs):
             chunks.setdefault(ty, []).append(k)
         recent = sorted(bills.values(), key=lambda r: (r["d"], r["n"]), reverse=True)[:400]
         save_json(os.path.join(base, "recent.json"), recent)
+        per_day = {}
+        for r in bills.values():
+            if r.get("d"):
+                per_day[r["d"]] = per_day.get(r["d"], 0) + 1
+        save_json(os.path.join(base, "intro.json"), {"days": dict(sorted(per_day.items()))})
         expected = None
         j = get("/bill/%d" % cg, limit=1)
         if j:
@@ -1054,6 +1059,180 @@ def update_titles(cgs, budget):
         remaining = len([k for k in want_b if k not in cache["bills"]]) + len([k for k in want_a if k not in cache["amendments"]])
         note("Titles: Congress %d, %d looked up this run, %d still to look up" % (cg, got, remaining))
 
+
+
+# ---------------------------------------------------------------- presidential nominations
+MIL_RE = re.compile(r"^\s*(Air Force|Army|Navy|Marine Corps|Space Force|Coast Guard|Public Health Service|National Oceanic)\b|nominations? (beginning|of)\b", re.I)
+
+
+def nomination_row(x):
+    la = x.get("latestAction") or {}
+    nt = x.get("nominationType") or {}
+    desc = re.sub(r"\s+", " ", x.get("description") or "").strip()
+    mil = nt.get("isMilitary")
+    if mil is None:
+        mil = bool(MIL_RE.search(desc) or MIL_RE.search(x.get("organization") or ""))
+    row = {"n": str(x.get("number")), "d": desc[:300], "o": (x.get("organization") or "")[:80],
+           "r": x.get("receivedDate") or "", "a": la.get("actionDate") or "",
+           "t": re.sub(r"\s+", " ", la.get("text") or "").strip()[:200], "u": x.get("updateDate") or ""}
+    if x.get("partNumber") and str(x.get("partNumber")).strip("0 "):
+        row["p"] = str(x.get("partNumber"))
+    if mil:
+        row["m"] = 1
+    return row
+
+
+def update_nominations(cgs, budget):
+    """data/nominations/{cg}.json: every presidential nomination of the Congress (civilian and military) with the
+    text and date of its latest action. A Congress has a few thousand, 250 per request, so a refresh is a few dozen
+    requests at most. Status (confirmed, withdrawn, pending ...) and subject groups are worked out in the browser
+    from the stored text, so they can be refined without reading the API again."""
+    if budget <= 0:
+        return
+    start = REQS
+    today = datetime.date.today()
+    for cg in sorted(cgs, reverse=True):
+        if cg < 81:
+            continue
+        path = os.path.join(OUT, "nominations", "%d.json" % cg)
+        old = load_json(path, {})
+        if old.get("final"):
+            continue
+        rows, offset, finished, first = {}, 0, False, None
+        while REQS - start < budget:
+            try:
+                j = get("/nomination/%d" % cg, offset=offset)
+            except Exception as ex:
+                log("  nominations for Congress %d failed: %s" % (cg, ex))
+                break
+            if first is None:
+                first = j
+            page = find_list(j, "nominations")
+            for x in page:
+                if x.get("number") is not None:
+                    rows[str(x["number"]) + "|" + str(x.get("partNumber") or "")] = nomination_row(x)
+            if len(page) < 250:
+                finished = True
+                break
+            offset += 250
+        if not rows:
+            note("Nominations: nothing read for Congress %d" % cg)
+            continue
+        if not finished:
+            # keep earlier rows for the part of the list not reached this run
+            merged = dict(old.get("rows") or {})
+            merged.update(rows)
+            rows = merged
+        items = sorted(rows.values(), key=lambda r: (r["r"], int(r["n"]) if r["n"].isdigit() else 0), reverse=True)
+        out = {"congress": cg, "updated": today.isoformat(), "complete": finished, "items": items,
+               "final": bool(finished and (today - congress_end(cg)).days >= FINAL_DAYS)}
+        save_json(path, out)
+        civ = sum(1 for r in items if not r.get("m"))
+        conf = sum(1 for r in items if r["t"].lower().startswith("confirmed"))
+        note("Nominations: Congress %d, %d nomination(s) saved (%d civilian), %d confirmed%s"
+             % (cg, len(items), civ, conf, "" if finished else "; more on the next run"))
+        kinds = {}
+        for r in items:
+            k = re.sub(r"\d+", "#", r["t"])[:48]
+            kinds[k] = kinds.get(k, 0) + 1
+        log("  Nomination latest-action texts (most common): " + "; ".join("%s x%d" % kv for kv in sorted(kinds.items(), key=lambda kv: -kv[1])[:8]))
+        if first:
+            sample = find_list(first, "nominations")[:1]
+            save_json(os.path.join(OUT, "probe", "nomination-list.json"), {"keys": sorted(sample[0].keys()) if sample else [], "sample": sample})
+
+
+# ---------------------------------------------------------------- committee meetings and hearings
+def meeting_row(eid, chamber, detail, listu):
+    m = (detail or {}).get("committeeMeeting") or detail or {}
+    loc = m.get("location") or {}
+    where = ", ".join(str(v) for v in (loc.get("room"), loc.get("building")) if v)
+    wit = m.get("witnesses") or []
+    ri = m.get("relatedItems") or {}
+    row = {"id": str(eid), "ch": chamber, "u": listu or "",
+           "ti": re.sub(r"\s+", " ", m.get("title") or "").strip()[:400],
+           "ty": m.get("type") or "", "st": m.get("meetingStatus") or "",
+           "dt": m.get("date") or "", "wh": where[:120],
+           "com": [{"n": c.get("name"), "c": c.get("systemCode")} for c in (m.get("committees") or []) if c.get("name")][:4],
+           "nw": len(wit),
+           "w": [{"n": w.get("name"), "o": (w.get("organization") or "")[:80], "p": (w.get("position") or "")[:80]} for w in wit[:12]],
+           "b": [{"t": b.get("type"), "n": b.get("number"), "c": b.get("congress")} for b in (ri.get("bills") or [])[:12]],
+           "nm": [str(n.get("number")) for n in (ri.get("nominations") or [])[:12] if n.get("number") is not None],
+           "v": 1 if (m.get("videos") or []) else 0}
+    return row
+
+
+def update_hearings(cgs, budget):
+    """data/hearings/{cg}.json: committee meetings and hearings, upcoming and past, from the committee-meeting endpoint.
+    The list gives only an event id and update time, so each meeting needs one detail request. Meetings are read when
+    new or when the list says they changed (which covers rescheduled and canceled ones)."""
+    if budget <= 0:
+        return
+    start = REQS
+    today = datetime.date.today()
+    for cg in sorted(cgs, reverse=True):
+        path = os.path.join(OUT, "hearings", "%d.json" % cg)
+        old = load_json(path, {})
+        if old.get("final"):
+            continue
+        have = {m["id"]: m for m in (old.get("meetings") or [])}
+        listed = {}
+        complete = True
+        for ch in ("house", "senate"):
+            offset = 0
+            while True:
+                if REQS - start >= budget:
+                    complete = False
+                    break
+                try:
+                    j = get("/committee-meeting/%d/%s" % (cg, ch), offset=offset)
+                except Exception as ex:
+                    log("  meeting list for %s %d failed: %s" % (ch, cg, ex))
+                    complete = False
+                    break
+                page = find_list(j, "committeeMeetings")
+                for x in page:
+                    if x.get("eventId") is not None:
+                        listed[str(x["eventId"])] = (ch, x.get("updateDate") or "")
+                if len(page) < 250:
+                    break
+                offset += 250
+                if offset > 10000:
+                    break
+        changed = [i for i, (ch, u) in listed.items() if i in have and have[i].get("u") != u]
+        new = [i for i in listed if i not in have]
+        changed.sort(key=lambda i: listed[i][1], reverse=True)
+        new.sort(key=lambda i: int(i) if i.isdigit() else 0, reverse=True)
+        todo = changed + new
+        log("Hearings: Congress %d lists %d meeting(s); %d new and %d changed need requests." % (cg, len(listed), len(new), len(changed)))
+        done = 0
+        probe = None
+        for i in todo:
+            if REQS - start >= budget:
+                break
+            ch, u = listed[i]
+            try:
+                d = get("/committee-meeting/%d/%s/%s" % (cg, ch, i))
+            except Exception as ex:
+                log("  meeting %s failed: %s" % (i, ex))
+                continue
+            if d is None:
+                have[i] = {"id": i, "ch": ch, "u": u, "x": 1}
+            else:
+                have[i] = meeting_row(i, ch, d, u)
+                if probe is None:
+                    probe = d
+            done += 1
+        pending = len([i for i in listed if i not in have or have[i].get("u") != listed[i][1]])
+        meetings = sorted(have.values(), key=lambda m: (m.get("dt") or "", m["id"]), reverse=True)
+        out = {"congress": cg, "updated": today.isoformat(), "complete": bool(complete and not pending), "meetings": meetings,
+               "final": bool(complete and not pending and (today - congress_end(cg)).days >= FINAL_DAYS)}
+        save_json(path, out)
+        if probe is not None:
+            save_json(os.path.join(OUT, "probe", "committee-meeting.json"), probe)
+        note("Hearings: Congress %d, %d meeting(s) saved, %d read this run, %d still waiting" % (cg, len(meetings), done, pending))
+        if REQS - start >= budget:
+            log("  Hearings: request budget reached (%d); the rest will be read on later runs." % budget)
+            break
 
 
 # ---------------------------------------------------------------- member contact details
@@ -1176,6 +1355,8 @@ def main():
     plan.append("Bill lists for the Bills tab (built from the sponsored/cosponsored files, 1 request per Congress)")
     plan.append("Bill and amendment titles for the votes (up to %d requests)" % title_budget)
     plan.append("Bills signed into law (public and private laws) for each Congress")
+    plan.append("Presidential nominations (250 per request, up to %s requests)" % os.environ.get("NOM_BUDGET", "60"))
+    plan.append("Committee meetings and hearings (one request per new or changed meeting, up to %s requests)" % os.environ.get("HEARING_BUDGET", "300"))
     plan.append("Member contact details (website, phone, contact form) from congress-legislators")
     plan.append("Save sponsored/cosponsored counts and the data status")
     STEP["of"] = len(plan)
@@ -1209,6 +1390,10 @@ def main():
     update_titles(keep, title_budget)
     step("Bills signed into law")
     update_laws(keep, cgs)
+    step("Nominations")
+    update_nominations(keep, int(os.environ.get("NOM_BUDGET", "60")))
+    step("Hearings and committee meetings")
+    update_hearings(keep, int(os.environ.get("HEARING_BUDGET", "300")))
     step("Member contact details")
     update_contacts()
     step("Saving legislation counts and status")

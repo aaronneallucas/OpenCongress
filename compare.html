@@ -19,6 +19,10 @@
   <div class="chart" id="ch-laws" style="max-width:760px"></div><div class="lg" id="lg-laws"></div>
   <p class="small" id="laws-note"></p>
 </div>
+<div class="two">
+  <div class="panel" style="margin-top:0"><h2>Bills introduced</h2><div class="chart" id="ch-bills"></div><div class="lg" id="lg-bills"></div><p class="small" id="bills-note"></p></div>
+  <div class="panel" style="margin-top:0"><h2>Civilian nominations confirmed</h2><div class="chart" id="ch-noms"></div><div class="lg" id="lg-noms"></div><p class="small" id="noms-note"></p></div>
+</div>
 <div class="panel">
   <h2>Roll calls by Congress</h2>
   <div class="tblwrap"><table class="tbl"><thead id="th"></thead><tbody id="tb"></tbody></table></div>
@@ -53,6 +57,26 @@
   } else {
     document.getElementById("laws-note").textContent = "Laws have not been collected yet. They are added by the next scheduled update.";
   }
+  /* bills introduced (as far as collected) and civilian nominations confirmed, by day of the Congress */
+  function colour(a) { a.sort(function (x, y) { return y.cg - x.cg; }); a.forEach(function (s, i) { s.color = Site.COLORS[i % Site.COLORS.length]; s.bold = s.cg === latest; }); return a; }
+  function show(id, series, label, note, msg) {
+    if (!series.length) { document.getElementById(note).textContent = msg; return; }
+    Site.lineChart(document.getElementById("ch-" + id), series, {label: label});
+    document.getElementById("lg-" + id).innerHTML = series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + s.label + " (" + s.c.total.toLocaleString() + ")</span>"; }).join("");
+  }
+  var BS = [], NS = [];
+  await Promise.all(info.congresses.map(async function (x) {
+    try { var j = await Site.json("data/billlist/" + x.congress + "/intro.json"); BS.push({cg: x.congress, label: Site.ordinal(x.congress) + " Congress", c: Site.cumulativeCounts(j.days, x.congress)}); } catch (e) {}
+    try {
+      var n = await Site.json("data/nominations/" + x.congress + ".json"), conf = [];
+      n.items.forEach(function (r) { if (!r.m) { var st = Site.nomStatus(r); if (st.k === "confirmed" && st.date) conf.push({date: st.date}); } });
+      if (conf.length) NS.push({cg: x.congress, label: Site.ordinal(x.congress) + " Congress", c: Site.cumulative(conf, x.congress)});
+    } catch (e) {}
+  }));
+  show("bills", colour(BS), "Bills introduced by Congress", "bills-note", "Bill lists have not been collected yet.");
+  if (BS.length) document.getElementById("bills-note").textContent = "Bills are gathered from members\u2019 sponsored lists, so a Congress still being backfilled may show fewer than were really introduced.";
+  show("noms", colour(NS), "Nominations confirmed by Congress", "noms-note", "Nominations have not been collected yet.");
+  if (NS.length) document.getElementById("noms-note").textContent = "Civilian nominations only. Military promotion lists are left out because they are confirmed in large batches.";
   document.getElementById("th").innerHTML = "<tr><th>Congress</th><th>Years</th><th class=\"num\">House total</th><th class=\"num\">House by day " + today +
     "</th><th class=\"num\">Senate total</th><th class=\"num\">Senate by day " + today + "</th></tr>";
   function cell(ch, cg) {

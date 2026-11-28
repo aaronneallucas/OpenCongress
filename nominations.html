@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nominations — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<h1>Presidential Nominations</h1>
+<p class="sub" id="sub"></p>
+<div class="chips" id="top"></div>
+<div class="cards" id="cards"></div>
+<div class="panel" id="chp" style="display:none"><h2 id="cht">Confirmations over time</h2><div class="chart" id="cch" style="max-width:760px"></div><div class="lg" id="clg"></div><p class="small">Each line counts nominations as of the day the Senate confirmed them. The horizontal axis spans the two years of the Congress.</p></div>
+<div class="chips" id="cats"></div>
+<div class="chips" id="sts"></div>
+<input id="find" type="search" placeholder="Search by nominee, position, agency, or PN number" style="margin-bottom:6px">
+<p class="small" id="count"></p>
+<div id="pg1"></div>
+<div id="list"></div>
+<div id="pg2"></div>
+<p class="foot" id="msg"></p>
+<p class="foot">Data: Congress.gov. Status and subject groups are worked out by this site from each nomination’s description and latest action, so they are approximate. Military nominations are listed in batches by the Senate and are counted separately.</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,ITEMS=[],MIL=false,CAT="",ST="",SIZE=50,LO=1,HI=1,CATN={military:"Military"};
+Site.NOM_CATS.forEach(function(c){CATN[c[0]]=c[1]});
+function pre(){ITEMS.forEach(function(r){if(!r._s){r._s=Site.nomStatus(r);r._c=Site.nomCat(r)}})}
+function base(){return ITEMS.filter(function(r){return MIL?r._c==="military":r._c!=="military"})}
+function days(a,b){var x=Date.parse(a),y=Date.parse(b);return isNaN(x)||isNaN(y)?null:Math.round((y-x)/864e5)}
+function cards(rows){
+  var c={confirmed:0,withdrawn:0,pending:0,other:0},d=[];
+  rows.forEach(function(r){var k=r._s.k;if(k==="confirmed"){c.confirmed++;var n=days(r.r,r._s.date);if(n!=null&&n>=0)d.push(n)}else if(k==="pending")c.pending++;else if(k==="withdrawn")c.withdrawn++;else c.other++});
+  d.sort(function(a,b){return a-b});var med=d.length?d[Math.floor(d.length/2)]:null;
+  var dec=c.confirmed+c.withdrawn+c.other;
+  function cd(k,v,t){return'<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="d">'+t+"</div></div>"}
+  document.getElementById("cards").innerHTML=cd(MIL?"Military lists":"Nominations",rows.length.toLocaleString(),"received this Congress")+cd("Confirmed",c.confirmed.toLocaleString(),rows.length?(100*c.confirmed/rows.length).toFixed(0)+"% of received":"")+
+    cd("Pending",c.pending.toLocaleString(),"no final action yet")+cd("Withdrawn",c.withdrawn.toLocaleString(),"by the President")+cd("Returned or other",c.other.toLocaleString(),"returned, rejected, or unclear")+
+    cd("Median wait",med==null?"—":med+" days","received to confirmed");
+}
+function chart(rows){
+  var p=document.getElementById("chp");
+  var conf=rows.filter(function(r){return r._s.k==="confirmed"&&r._s.date});
+  if(conf.length<2){p.style.display="none";return}
+  p.style.display="";
+  var S=[{label:"All "+(MIL?"military lists":"civilian"),color:"#222",bold:true,rows:conf}];
+  if(!MIL)["judicial","ambassador","dept","agency"].forEach(function(k,i){var x=conf.filter(function(r){return r._c===k});if(x.length>1)S.push({label:CATN[k],color:Site.COLORS[i+1],rows:x})});
+  S.forEach(function(s){s.c=Site.cumulative(s.rows.map(function(r){return{date:r._s.date}}),CG)});
+  Site.lineChart(document.getElementById("cch"),S,{w:760,h:280,label:"Nominations confirmed over time"});
+  document.getElementById("clg").innerHTML=S.map(function(s){return'<span><i style="background:'+s.color+'"></i>'+esc(s.label)+" ("+s.c.total+")</span>"}).join("");
+}
+function chips(rows){
+  var cnt={};rows.forEach(function(r){cnt[r._c]=(cnt[r._c]||0)+1});
+  var h='<b style="font-size:14px">Subject:</b><button data-c=""'+(CAT===""?' class="on"':"")+">All ("+rows.length+")</button>";
+  if(!MIL)Site.NOM_CATS.forEach(function(c){if(cnt[c[0]])h+='<button data-c="'+c[0]+'"'+(CAT===c[0]?' class="on"':"")+">"+esc(c[1])+" ("+cnt[c[0]]+")</button>"});
+  document.getElementById("cats").innerHTML=h;
+  document.querySelectorAll("#cats button").forEach(function(b){b.onclick=function(){CAT=b.dataset.c;LO=HI=1;draw()}});
+  var sc={};rows.forEach(function(r){sc[r._s.k]=(sc[r._s.k]||0)+1});
+  var s='<b style="font-size:14px">Status:</b><button data-s=""'+(ST===""?' class="on"':"")+">Any</button>";
+  Object.keys(Site.NOM_STATUS).forEach(function(k){if(sc[k])s+='<button data-s="'+k+'"'+(ST===k?' class="on"':"")+">"+esc(Site.NOM_STATUS[k][0])+" ("+sc[k]+")</button>"});
+  document.getElementById("sts").innerHTML=s;
+  document.querySelectorAll("#sts button").forEach(function(b){b.onclick=function(){ST=b.dataset.s;LO=HI=1;draw()}});
+}
+function row(r){
+  var s=r._s,st=Site.NOM_STATUS[s.k],meta=[];
+  var pill='<span class="pill '+st[1]+'" style="font-size:11px;padding:1px 8px">'+esc(st[0])+"</span>";
+  var vote="";
+  if(s.k==="confirmed"){
+    var yr=(s.date||"").slice(0,4),ss=parseInt(yr,10)===1789+2*(CG-1)?1:2;
+    vote=s.voice?" · voice vote or unanimous consent":(s.yea!=null?" · "+s.yea+"–"+s.nay:"");
+    if(s.roll&&yr)vote+=' · <a href="'+Site.voteHref("senate",CG,ss,s.roll)+'">roll call '+s.roll+"</a>";
+  }
+  return'<div class="row"><div class="t"><b>PN '+esc(r.n)+(r.p?"-"+esc(r.p):"")+"</b> "+pill+"</div>"+
+    '<div class="tt">'+esc(Site.clip(r.d,260))+"</div>"+
+    '<div class="m">'+(r.o?esc(r.o)+" · ":"")+(r._c!=="military"?esc(CATN[r._c])+" · ":"")+(r.r?"Received "+esc(Site.fmtDate(r.r)):"")+(s.k!=="pending"&&s.date?" · "+esc(st[0])+" "+esc(Site.fmtDate(s.date)):"")+vote+
+    ' · <a href="'+Site.nomUrl(CG,r.n)+'" target="_blank" rel="noopener">Congress.gov</a></div>'+
+    (s.k==="pending"&&r.t?'<div class="tt dim">'+esc(Site.clip(r.t,200))+"</div>":"")+"</div>";
+}
+function draw(){
+  var all=base();cards(all);chart(all);chips(all);
+  var q=document.getElementById("find").value.trim().toLowerCase();
+  var rows=all.filter(function(r){
+    if(CAT&&r._c!==CAT)return false;if(ST&&r._s.k!==ST)return false;
+    return!q||(r.d+" "+r.o+" PN"+r.n+" "+r.n).toLowerCase().indexOf(q)>-1});
+  var pages=Math.max(1,Math.ceil(rows.length/SIZE));if(LO>pages)LO=pages;if(HI>pages)HI=pages;if(HI<LO)HI=LO;
+  document.getElementById("count").textContent=rows.length.toLocaleString()+" nomination"+(rows.length===1?"":"s");
+  document.getElementById("list").innerHTML=rows.slice((LO-1)*SIZE,HI*SIZE).map(row).join("")||'<p class="small">Nothing matches.</p>';
+  Site.pager([document.getElementById("pg1"),document.getElementById("pg2")],{total:rows.length,size:SIZE,lo:LO,hi:HI,
+    onPage:function(n){LO=HI=n;draw();window.scrollTo(0,document.getElementById("pg1").getBoundingClientRect().top+window.pageYOffset-70)},
+    onMore:function(){HI++;draw()},onSize:function(n){SIZE=n;LO=HI=1;draw()}});
+  document.getElementById("cht").textContent="Confirmations over time";
+}
+function buildTop(info){
+  var h='<select id="cgs">'+info.congresses.map(function(x){return'<option value="'+x.congress+'"'+(x.congress===CG?" selected":"")+">"+Site.ordinal(x.congress)+" Congress ("+x.years+")</option>"}).join("")+"</select>"+
+    '<button data-m="0" class="'+(!MIL?"on":"")+'">Civilian</button><button data-m="1" class="'+(MIL?"on":"")+'">Military</button>';
+  document.getElementById("top").innerHTML=h;
+  document.getElementById("cgs").onchange=function(){CG=parseInt(this.value,10);history.replaceState(null,"","?congress="+CG);load(info)};
+  document.querySelectorAll("#top button").forEach(function(b){b.onclick=function(){MIL=b.dataset.m==="1";CAT=ST="";LO=HI=1;buildTop(info);draw()}});
+}
+async function load(info){
+  document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress ("+((info.congresses.filter(function(x){return x.congress===CG})[0]||{}).years||"")+"). Nominations sent to the Senate by the President.";
+  try{var j=await Site.json("data/nominations/"+CG+".json");ITEMS=j.items;pre();
+    document.getElementById("msg").textContent="";
+    if(!j.complete)document.getElementById("msg").textContent="Still being collected: more nominations will appear after the next updates.";
+  }catch(e){ITEMS=[];document.getElementById("msg").textContent="No nomination data saved yet for this Congress. It appears after the next update that includes nominations."}
+  CAT=ST="";LO=HI=1;buildTop(info);draw();
+}
+(async function(){
+  Site.nav("nominations");
+  var info=await Site.congresses();if(!info)info={latest:119,congresses:[{congress:119,years:"2025–2027"}]};
+  var q=Site.qs();CG=parseInt(q.get("congress"),10)||info.latest;
+  load(info);
+})();
+</script>
+</body>
+</html>

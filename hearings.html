@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hearings — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<h1>Committee Hearings and Meetings</h1>
+<p class="sub" id="sub"></p>
+<div class="chips" id="top"></div>
+<div class="cards" id="cards"></div>
+<div class="chips" id="flt"></div>
+<input id="find" type="search" placeholder="Search by title, committee, witness, or bill" style="margin-bottom:6px">
+<p class="small" id="count"></p>
+<div id="pg1"></div>
+<div id="list"></div>
+<div id="pg2"></div>
+<p class="foot" id="msg"></p>
+<p class="foot">Data: Congress.gov committee meetings. Meetings are read one at a time, so a Congress fills in over several updates. Times are shown in Eastern time. Witness lists and related bills are included when committees publish them.</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,MEET=[],VIEW="up",CH="",TY="",SIZE=50,LO=1,HI=1;
+function today(){var d=new Date();return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2)}
+function dpart(m){return(m.dt||"").slice(0,10)}
+function typeOf(m){var t=(m.ty||"").toLowerCase();return/hearing/.test(t)?"hearing":/mark/.test(t)?"markup":"meeting"}
+function when(m){
+  if(!m.dt)return"Date not listed";
+  var d=new Date(m.dt);if(isNaN(d))return esc(m.dt);
+  var o={timeZone:"America/New_York"};
+  var ds=d.toLocaleDateString("en-US",Object.assign({weekday:"short",month:"short",day:"numeric",year:"numeric"},o));
+  if(/T00:00:00/.test(m.dt))return ds;
+  return ds+", "+d.toLocaleTimeString("en-US",Object.assign({hour:"numeric",minute:"2-digit"},o))+" ET";
+}
+function stPill(m){
+  var s=(m.st||"").toLowerCase();if(!s||s==="scheduled")return"";
+  return' <span class="pill '+(/cancel|postpon/.test(s)?"n":"g")+'" style="font-size:11px;padding:1px 8px">'+esc(m.st)+"</span>"}
+function row(m){
+  var coms=(m.com||[]).map(function(c){return esc(c.n)}).join("; ");
+  var bills=(m.b||[]).map(function(b){var k=String(b.t||"").toUpperCase()+" "+b.n;return'<a href="bill.html?congress='+(b.c||CG)+"&type="+encodeURIComponent(String(b.t||"").toUpperCase())+"&number="+b.n+'">'+esc(Site.billLabel(k))+"</a>"}).join(", ");
+  var det="";
+  if((m.w||[]).length)det+='<details class="dt"><summary>'+m.nw+" witness"+(m.nw===1?"":"es")+'</summary><ul class="wl">'+m.w.map(function(w){return"<li>"+esc(w.n||"")+(w.p?", "+esc(w.p):"")+(w.o?" ("+esc(w.o)+")":"")+"</li>"}).join("")+(m.nw>m.w.length?"<li>and "+(m.nw-m.w.length)+" more</li>":"")+"</ul></details>";
+  return'<div class="row"><div class="t"><b>'+esc(m.ti||"Untitled meeting")+"</b>"+stPill(m)+"</div>"+
+    (coms?'<div class="tt">'+coms+"</div>":"")+
+    '<div class="m">'+esc(m.ty||"Meeting")+" · "+when(m)+(m.wh?" · "+esc(m.wh):"")+" · "+Site.chamberName(m.ch)+(m.v?" · video available":"")+
+    ' · <a href="'+Site.eventUrl(CG,m.ch,m.id)+'" target="_blank" rel="noopener">Congress.gov</a></div>'+
+    (bills?'<div class="tt dim">Related bills: '+bills+"</div>":"")+
+    ((m.nm||[]).length?'<div class="tt dim">Related nominations: '+m.nm.map(function(n){return'<a href="'+Site.nomUrl(CG,n)+'" target="_blank" rel="noopener">PN '+esc(n)+"</a>"}).join(", ")+"</div>":"")+det+"</div>";
+}
+function flt(){
+  var h='<button data-v="up"'+(VIEW==="up"?' class="on"':"")+'>Upcoming</button><button data-v="past"'+(VIEW==="past"?' class="on"':"")+'>Previous</button><span style="width:14px"></span>'+
+   '<button data-c=""'+(CH===""?' class="on"':"")+'>Both chambers</button><button data-c="house"'+(CH==="house"?' class="on"':"")+'>House</button><button data-c="senate"'+(CH==="senate"?' class="on"':"")+'>Senate</button><span style="width:14px"></span>'+
+   '<button data-t=""'+(TY===""?' class="on"':"")+'>All types</button><button data-t="hearing"'+(TY==="hearing"?' class="on"':"")+'>Hearings</button><button data-t="markup"'+(TY==="markup"?' class="on"':"")+'>Markups</button><button data-t="meeting"'+(TY==="meeting"?' class="on"':"")+'>Other meetings</button>';
+  var el=document.getElementById("flt");el.innerHTML=h;
+  el.querySelectorAll("button").forEach(function(b){b.onclick=function(){
+    if(b.dataset.v!=null)VIEW=b.dataset.v;else if(b.dataset.c!=null)CH=b.dataset.c;else TY=b.dataset.t;LO=HI=1;flt();draw()}});
+}
+function draw(){
+  var t=today(),q=document.getElementById("find").value.trim().toLowerCase();
+  var good=MEET.filter(function(m){return!m.x});
+  var up=good.filter(function(m){return dpart(m)>=t}).length,hc=good.filter(function(m){return typeOf(m)==="hearing"}).length;
+  var coms={};good.forEach(function(m){(m.com||[]).forEach(function(c){coms[c.c||c.n]=1})});
+  function cd(k,v,d){return'<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="d">'+d+"</div></div>"}
+  document.getElementById("cards").innerHTML=cd("Meetings saved",good.length.toLocaleString(),"hearings, markups and meetings")+cd("Hearings",hc.toLocaleString(),"of those")+cd("Upcoming",up.toLocaleString(),"scheduled from today")+cd("Committees",Object.keys(coms).length,"with a meeting saved");
+  var rows=good.filter(function(m){
+    var d=dpart(m);if(VIEW==="up"?!(d>=t):(d>=t))return false;
+    if(!d&&VIEW==="up")return false;
+    if(CH&&m.ch!==CH)return false;if(TY&&typeOf(m)!==TY)return false;
+    if(!q)return true;
+    return[m.ti,(m.com||[]).map(function(c){return c.n}).join(" "),(m.w||[]).map(function(w){return w.n+" "+w.o}).join(" "),(m.b||[]).map(function(b){return b.t+b.n}).join(" ")].join(" ").toLowerCase().indexOf(q)>-1});
+  rows.sort(function(a,b){var x=(a.dt||""),y=(b.dt||"");return VIEW==="up"?(x<y?-1:x>y?1:0):(x<y?1:x>y?-1:0)});
+  var pages=Math.max(1,Math.ceil(rows.length/SIZE));if(LO>pages)LO=pages;if(HI>pages)HI=pages;if(HI<LO)HI=LO;
+  document.getElementById("count").textContent=rows.length.toLocaleString()+" "+(VIEW==="up"?"upcoming":"previous")+" meeting"+(rows.length===1?"":"s");
+  document.getElementById("list").innerHTML=rows.slice((LO-1)*SIZE,HI*SIZE).map(row).join("")||'<p class="small">Nothing matches.</p>';
+  Site.pager([document.getElementById("pg1"),document.getElementById("pg2")],{total:rows.length,size:SIZE,lo:LO,hi:HI,
+    onPage:function(n){LO=HI=n;draw();window.scrollTo(0,document.getElementById("pg1").getBoundingClientRect().top+window.pageYOffset-70)},
+    onMore:function(){HI++;draw()},onSize:function(n){SIZE=n;LO=HI=1;draw()}});
+}
+function buildTop(info){
+  document.getElementById("top").innerHTML='<select id="cgs">'+info.congresses.map(function(x){return'<option value="'+x.congress+'"'+(x.congress===CG?" selected":"")+">"+Site.ordinal(x.congress)+" Congress ("+x.years+")</option>"}).join("")+"</select>";
+  document.getElementById("cgs").onchange=function(){CG=parseInt(this.value,10);history.replaceState(null,"","?congress="+CG);load(info)};
+}
+async function load(info){
+  document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress ("+((info.congresses.filter(function(x){return x.congress===CG})[0]||{}).years||"")+"). Upcoming and previous House and Senate committee hearings, markups and meetings.";
+  try{var j=await Site.json("data/hearings/"+CG+".json");MEET=j.meetings;
+    document.getElementById("msg").textContent=j.complete?"":"Still being collected: more meetings will appear after the next updates.";
+  }catch(e){MEET=[];document.getElementById("msg").textContent="No hearing data saved yet for this Congress. It appears after the next update that includes hearings."}
+  LO=HI=1;buildTop(info);flt();draw();
+}
+document.getElementById("find").oninput=function(){LO=HI=1;draw()};
+(async function(){
+  Site.nav("hearings");
+  var info=await Site.congresses();if(!info)info={latest:119,congresses:[{congress:119,years:"2025–2027"}]};
+  var q=Site.qs();CG=parseInt(q.get("congress"),10)||info.latest;
+  load(info);
+})();
+</script>
+</body>
+</html>

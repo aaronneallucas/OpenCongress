@@ -13,6 +13,7 @@
 <p id="title" style="font-size:17px;max-width:900px"></p>
 <div class="cards" id="cards"></div>
 <p class="small" id="links"></p>
+<p class="small" id="dlrow"><b>Download this bill’s data:</b> <button type="button" id="dlc">Cosponsors (CSV)</button> <button type="button" id="dlj">Bill record (JSON)</button></p>
 <div class="panel" id="sump"><h2>Summary</h2><div class="sumtext" id="sum"></div><p class="small" id="sumn"></p></div>
 <div class="panel" id="tickp" style="display:none"><h2>Cosponsors by party</h2><div id="ticks" style="line-height:0"></div><p class="small" id="tickn"></p></div>
 <div class="panel" id="chp" style="display:none"><h2>Cosponsors over time</h2><div class="chart" id="cch" style="max-width:760px"></div><div class="lg" id="clg"></div><p class="small">Dates are when each member signed on, so the first step is the bill’s original cosponsors. The horizontal axis spans the two years of the Congress.</p></div>
@@ -70,6 +71,13 @@ function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><di
       document.getElementById("sumn").textContent="Summary written by the Congressional Research Service"+(sm.a?" for the stage: "+sm.a:"")+(sm.d?" ("+Site.fmtDate(sm.d)+")":"")+". Long summaries are shortened here; the full text is on Congress.gov."
     }else throw 0;
   }catch(e){document.getElementById("sum").innerHTML='<p class="small">No summary collected for this bill. The Congressional Research Service writes summaries only after a bill has moved, and they appear here after the next update.</p>'}
+  var fn=(ty+"-"+n+"-"+CG).replace(/[^A-Za-z0-9\-]+/g,"_");
+  document.getElementById("dlc").onclick=function(){Site.saveFile(fn+"-cosponsors.csv",Site.csv(["Member id","Name","Party","State","District","Date cosponsored"],
+    cr.map(function(x){return[x.id,x.e.first+" "+x.e.last,x.c.party,x.c.state,x.c.district||"",x.date||""]})))};
+  document.getElementById("dlj").onclick=function(){Site.saveFile(fn+".json",JSON.stringify({bill:key,congress:CG,title:title,record:rec,law:law||null,
+    cosponsors:cr.map(function(x){return{id:x.id,name:x.e.first+" "+x.e.last,party:x.c.party,state:x.c.state,district:x.c.district||null,date:x.date||null}}),
+    votes:votes_for_download()},null,1),"application/json")};
+  function votes_for_download(){var o=[];r[3].concat(r[4]).forEach(function(v){if(v.bill===key)o.push({chamber:v.chamber,session:v.session,roll:v.roll,date:v.date,question:v.question,result:v.result,yes:v.yes,no:v.no})});return o}
   var url=Site.billUrl(ty,n,CG);
   document.getElementById("links").innerHTML=url?'<a href="'+url+'" target="_blank" rel="noopener">View '+esc(label)+" on Congress.gov</a>":"";
   var votes=[];r[3].forEach(function(v){if(v.bill===key)votes.push(v)});r[4].forEach(function(v){if(v.bill===key)votes.push(v)});
