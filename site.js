@@ -86,6 +86,7 @@
     host.innerHTML = '<nav class="topnav"><a class="brand" href="index.html">Open Congress</a>' +
       tab("votes", "Votes", "votes.html", "votes") + tab("members", "Members", "members.html", "members") +
       '<div class="tab' + (active === "bills" ? " on" : "") + '"><button type="button" data-href="bills.html">Bills</button></div>' +
+      '<div class="tab' + (active === "committees" ? " on" : "") + '"><button type="button" data-href="committees.html">Committees</button></div>' +
       '<div class="tab' + (active === "nominations" ? " on" : "") + '"><button type="button" data-href="nominations.html">Nominations</button></div>' +
       '<div class="tab' + (active === "hearings" ? " on" : "") + '"><button type="button" data-href="hearings.html">Hearings</button></div>' +
       '<div class="tab' + (active === "relationships" ? " on" : "") + '"><button type="button" data-href="relationships.html">Relationships</button></div>' +
@@ -204,6 +205,26 @@
     a.href = URL.createObjectURL(new Blob([text], {type: (type || "text/csv") + ";charset=utf-8"}));
     a.download = name; document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  };
+  /* one bill's entry from a 250-bill chunk file such as data/billdetail/119/HR-0.json; null when absent */
+  Site.chunkGet = async function (dir, ty, n) {
+    try { var j = await Site.json(dir + "/" + String(ty).toUpperCase() + "-" + Math.floor((n - 1) / 250) + ".json"); return j[String(n)] || null; }
+    catch (e) { return null; }
+  };
+  /* "PN123" or "PN12-1" -> {n, p} */
+  Site.pnParts = function (s) { var m = String(s || "").toUpperCase().replace(/\s+/g, "").match(/^PN(\d+)(?:-(\d+))?$/); return m ? {n: m[1], p: m[2] || ""} : null; };
+  Site.nomHref = function (cg, n, p) { return "nomination.html?congress=" + cg + "&n=" + n + (p ? "&p=" + p : ""); };
+  Site.hearingHref = function (cg, id) { return "hearing.html?congress=" + cg + "&id=" + id; };
+  Site.committeeHref = function (cg, code) { return "committee.html?congress=" + cg + "&code=" + code; };
+  /* one row of the bill list (title, sponsor, dates); loads only the 2000-bill chunk it lives in */
+  var BLC = {};
+  Site.billRow = async function (cg, ty, n) {
+    ty = String(ty).toUpperCase(); n = +n;
+    var k = cg + "|" + ty + "|" + Math.floor((n - 1) / 2000);
+    if (!BLC[k]) BLC[k] = Site.json("data/billlist/" + cg + "/" + ty + "-" + Math.floor((n - 1) / 2000) + ".json").catch(function () { return []; });
+    var rows = await BLC[k];
+    for (var i = 0; i < rows.length; i++) if (rows[i].n === n) return rows[i];
+    return null;
   };
   Site.clip = function (s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, "") + "\u2026" : s; };
   Site.voteTitle = function (j) {

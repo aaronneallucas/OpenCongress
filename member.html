@@ -12,6 +12,7 @@
 <h1 id="h">Member</h1>
 <p class="sub" id="sub"></p>
 <div class="chips" id="cg"></div>
+<div class="panel" id="comms" style="display:none"><h2>Committees</h2><div id="cmlist" class="chips"></div></div>
 <div class="panel cnt" id="contact" style="display:none"><h2>Contact</h2><dl id="cdl"></dl></div>
 <div class="cards" id="cards"></div>
 <p class="small" id="note"></p>
@@ -141,6 +142,17 @@ function wireDownloads(){
       votes:VROWS.map(function(r){return{date:r.v.date,session:r.v.session,roll:r.v.roll,bill:r.v.bill,question:r.v.question,result:r.v.result,code:r.code}}),
       sponsored:(LEG&&LEG.congresses&&LEG.congresses[CG]||{}).sponsored||[],cosponsored:(LEG&&LEG.congresses&&LEG.congresses[CG]||{}).cosponsored||[]},null,1),"application/json")};
 }
+var COMM=null;
+async function drawComms(){
+  var box=document.getElementById("comms");box.style.display="none";
+  if(COMM===null){try{COMM=await Site.json("data/members/committees.json")}catch(e){COMM={}}}
+  var cur=(await Site.congresses());if(cur&&cur.latest!==CG)return;
+  var l=(COMM.members||{})[ME.id];if(!l||!l.length)return;
+  var cm=COMM.committees||{};
+  document.getElementById("cmlist").innerHTML=l.map(function(a){var n=(cm[a[0]]||{}).n||a[0];
+    return'<a class="chip" href="'+Site.committeeHref(CG,a[0])+'">'+esc(n)+(a[2]?" · "+esc(a[2]):"")+"</a>"}).join("");
+  box.style.display="";
+}
 var CONTACT=null;
 async function drawContact(){
   var box=document.getElementById("contact");box.style.display="none";
@@ -171,7 +183,7 @@ async function loadCongress(){
   var pn={D:"Democratic",R:"Republican",I:"Independent"}[c.party]||c.party||"";
   document.getElementById("sub").innerHTML='<span class="badge '+((c.party==="D"||c.party==="R")?c.party:"I")+'">'+esc(c.party||"?")+"</span> "+esc(pn)+" · "+esc(c.state)+(CH==="house"&&c.district?", District "+c.district:"")+" · "+Site.ordinal(CG)+" Congress "+Site.chamberName(CH);
   document.getElementById("back").href="members.html?chamber="+CH+"&congress="+CG;
-  drawContact();
+  drawContact();drawComms();
   document.getElementById("note").textContent="Missed votes count roll calls recorded as Not Voting. The data does not say why. “Against party” means the member voted differently from the majority of their own party on that roll call. Maverick score adds, for each such vote, the number of party members who voted with the majority minus the number who voted against.";
   try{
     var r=await Promise.all([Site.json("data/"+CH+"/"+CG+"/matrix.json"),Site.json("data/"+CH+"/"+CG+"/index.json")]);

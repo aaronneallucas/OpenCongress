@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Committees — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+<style>.cm{margin:0 0 14px}.cm .sub2{margin:4px 0 0 18px;font-size:14px;color:var(--muted)}.cm .sub2 a{color:inherit}</style>
+</head>
+<body>
+<div id="nav"></div>
+<h1>Committees</h1>
+<p class="sub" id="sub"></p>
+<div class="chips" id="top"></div>
+<input id="find" type="search" placeholder="Search committees" style="margin-bottom:10px">
+<div id="list"></div>
+<p class="foot" id="msg"></p>
+<p class="foot">Data: Congress.gov (committees and the bills referred to them). A bill can be referred to several committees. Counts include only bills collected on this site.</p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,LIST=[],COUNTS={};
+function draw(){
+  var q=document.getElementById("find").value.trim().toLowerCase(),by={};
+  LIST.forEach(function(c){if(!c.p)by[c.c]=by[c.c]||{c:c,subs:[]}});
+  LIST.forEach(function(c){if(c.p&&by[c.p])by[c.p].subs.push(c)});
+  var h="";
+  [["house","House"],["senate","Senate"],["joint","Joint"]].forEach(function(ch){
+    var rows=Object.keys(by).map(function(k){return by[k]}).filter(function(g){return g.c.ch===ch[0]}).filter(function(g){
+      return!q||g.c.n.toLowerCase().indexOf(q)>-1||g.subs.some(function(s){return s.n.toLowerCase().indexOf(q)>-1})});
+    rows.sort(function(a,b){return a.c.n<b.c.n?-1:1});
+    if(!rows.length)return;
+    h+="<h2>"+ch[1]+" ("+rows.length+")</h2>"+rows.map(function(g){
+      var n=COUNTS[g.c.c];
+      return'<div class="cm"><a href="'+Site.committeeHref(CG,g.c.c)+'"><b>'+esc(g.c.n)+"</b></a>"+(n!=null?' <span class="small">'+n.toLocaleString()+" bills</span>":"")+
+        (g.subs.length?'<div class="sub2">'+g.subs.sort(function(a,b){return a.n<b.n?-1:1}).map(function(s){return'<a href="'+Site.committeeHref(CG,s.c)+'">'+esc(s.n)+"</a>"+(COUNTS[s.c]!=null?" ("+COUNTS[s.c]+")":"")}).join(" · ")+"</div>":"")+"</div>"}).join("")});
+  document.getElementById("list").innerHTML=h||'<p class="small">Nothing matches.</p>';
+}
+async function load(info){
+  document.getElementById("sub").textContent=Site.ordinal(CG)+" Congress. House, Senate and joint committees with subcommittees, their bills, meetings and members.";
+  try{var j=await Site.json("data/committees/"+CG+".json");LIST=j.committees;COUNTS=j.counts||{};document.getElementById("msg").textContent=""}
+  catch(e){LIST=[];COUNTS={};document.getElementById("msg").textContent="No committee data saved yet for this Congress. It appears after the next update that includes committees."}
+  draw();
+}
+(async function(){
+  Site.nav("committees");
+  var info=await Site.congresses()||{latest:119,congresses:[{congress:119,years:"2025–2027"}]};
+  CG=parseInt(Site.qs().get("congress"),10)||info.latest;
+  document.getElementById("top").innerHTML='<select id="cgs">'+info.congresses.map(function(x){return'<option value="'+x.congress+'"'+(x.congress===CG?" selected":"")+">"+Site.ordinal(x.congress)+" Congress ("+x.years+")</option>"}).join("")+"</select>";
+  document.getElementById("cgs").onchange=function(){CG=parseInt(this.value,10);history.replaceState(null,"","?congress="+CG);load(info)};
+  document.getElementById("find").oninput=draw;
+  load(info);
+})();
+</script>
+</body>
+</html>

@@ -246,6 +246,8 @@ function showLinks(j){
     if(el.firstChild)el.appendChild(document.createTextNode(" · "));el.appendChild(a)}
   var b=Site.billLink(j),bm=(j.bill||"").match(/^([A-Za-z]+)\s*(\d+)$/);
   if(bm&&bm[1].toUpperCase()!=="PN")add("View "+Site.billLabel(j.bill)+" on Open Congress","bill.html?congress="+j.congress+"&type="+bm[1].toUpperCase()+"&number="+bm[2]);
+  var pn=Site.pnParts(j.bill);
+  if(pn)add("View nomination PN "+pn.n+(pn.p?"-"+pn.p:"")+" on Open Congress",Site.nomHref(j.congress,pn.n,pn.p));
   if(b)add("View "+(j.bill||"bill")+" on Congress.gov",b);
   if(j.amendment){var am=j.amendment.match(/^([A-Za-z]+)\s*(\d+)$/);
     if(am){var side=am[1].toUpperCase().indexOf("S")===0?"senate-amendment":"house-amendment";

@@ -127,3 +127,5 @@ input[type=search],input[type=text]{width:100%}
 .row .tt.dim{color:var(--muted);font-size:13px}
 .wl{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--muted)}
 details.dt>summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:4px}
+a.chip,button.subj{display:inline-block;padding:3px 10px;border:1px solid var(--line,#d0d5dd);border-radius:999px;background:#fff;font-size:13px;text-decoration:none;color:inherit;cursor:pointer}
+a.chip:hover,button.subj:hover{background:#eef2f7}

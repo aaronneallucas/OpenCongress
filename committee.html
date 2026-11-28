@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Committee — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<p class="small"><a id="back" href="committees.html">← All committees</a></p>
+<h1 id="h">Committee</h1>
+<p class="sub" id="sub"></p>
+<div class="cards" id="cards"></div>
+<div class="chips" id="tabs"><button data-t="bills" class="on">Bills</button><button data-t="meet">Hearings and meetings</button><button data-t="mem">Members</button></div>
+<div class="panel" id="p-bills"><div id="pg1"></div><div id="bl"></div><div id="pg2"></div></div>
+<div class="panel" id="p-meet" style="display:none"><div id="ml"></div></div>
+<div class="panel" id="p-mem" style="display:none"><div id="mm"></div></div>
+<p class="foot" id="msg"></p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc,CG=119,CODE="",KEYS=[],SIZE=25,LO=1,HI=1;
+async function drawBills(){
+  var pages=Math.max(1,Math.ceil(KEYS.length/SIZE));if(LO>pages)LO=pages;if(HI>pages)HI=pages;
+  var vis=KEYS.slice((LO-1)*SIZE,HI*SIZE),rows=await Promise.all(vis.map(function(k){var p=k.split(" ");return Site.billRow(CG,p[0],p[1])}));
+  document.getElementById("bl").innerHTML=vis.map(function(k,i){var p=k.split(" "),r=rows[i];
+    return'<div class="row"><div class="t"><a href="bill.html?congress='+CG+"&type="+p[0]+"&number="+p[1]+'"><b>'+esc(Site.billLabel(k))+"</b></a></div>"+(r&&r.t?'<div class="tt">'+esc(Site.clip(r.t,240))+"</div>":"")+(r&&r.d?'<div class="m">Introduced '+esc(Site.fmtDate(r.d))+"</div>":"")+"</div>"}).join("")||'<p class="small">No bills referred to this committee have been saved yet.</p>';
+  Site.pager([document.getElementById("pg1"),document.getElementById("pg2")],{total:KEYS.length,size:SIZE,lo:LO,hi:HI,
+    onPage:function(n){LO=HI=n;drawBills()},onMore:function(){HI++;drawBills()},onSize:function(n){SIZE=n;LO=HI=1;drawBills()}});
+}
+(async function(){
+  Site.nav("committees");
+  var q=Site.qs(),info=await Site.congresses()||{latest:119};CG=parseInt(q.get("congress"),10)||info.latest;CODE=(q.get("code")||"").toLowerCase();
+  document.getElementById("back").href="committees.html?congress="+CG;
+  var list=[],me=null;
+  try{list=(await Site.json("data/committees/"+CG+".json")).committees}catch(e){}
+  me=list.filter(function(c){return c.c===CODE})[0];
+  var roster=null;try{roster=await Site.json("data/members/committees.json")}catch(e){}
+  var rn=roster&&roster.committees&&roster.committees[CODE];
+  var name=me?me.n:rn?rn.n:CODE;
+  document.getElementById("h").textContent=name;document.title=name+" — Open Congress";
+  var parent=me&&me.p?list.filter(function(c){return c.c===me.p})[0]:null,subs=list.filter(function(c){return c.p===CODE});
+  document.getElementById("sub").innerHTML=(me?Site.chamberName(me.ch)||me.ch:"")+(me&&me.ty?" · "+esc(me.ty):"")+(parent?' · part of <a href="'+Site.committeeHref(CG,parent.c)+'">'+esc(parent.n)+"</a>":"")+
+    (subs.length?'<br>Subcommittees: '+subs.map(function(s){return'<a href="'+Site.committeeHref(CG,s.c)+'">'+esc(s.n)+"</a>"}).join(" · "):"");
+  try{KEYS=((await Site.json("data/committees/bills/"+CODE+".json")).bills||{})[String(CG)]||[]}catch(e){KEYS=[]}
+  KEYS.sort(function(a,b){var x=a.split(" "),y=b.split(" ");return x[0]===y[0]?(+y[1])-(+x[1]):(x[0]<y[0]?-1:1)});
+  var meet=[];try{meet=(await Site.json("data/hearings/"+CG+".json")).meetings.filter(function(m){return!m.x&&(m.com||[]).some(function(c){return c.c===CODE})})}catch(e){}
+  meet.sort(function(a,b){return(b.dt||"")<(a.dt||"")?-1:1});
+  var mem=[];
+  if(roster&&CG===info.latest){var dir=[];try{dir=await Site.json("data/members/directory.json")}catch(e){}var dm={};dir.forEach(function(d){dm[d.id]=d});
+    Object.keys(roster.members).forEach(function(b){roster.members[b].forEach(function(r){if(r[0]===CODE&&dm[b])mem.push({e:dm[b],rank:r[1]||999,title:r[2]||"",side:r[3]||""})})});
+    mem.sort(function(a,b){return(a.title?0:1)-(b.title?0:1)||a.rank-b.rank})}
+  function cd(k,v,t){return'<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="d">'+t+"</div></div>"}
+  document.getElementById("cards").innerHTML=cd("Bills",KEYS.length.toLocaleString(),"referred this Congress")+cd("Meetings",meet.length.toLocaleString(),"saved")+cd("Members",CG===info.latest?mem.length:"—",CG===info.latest?"serving now":"current Congress only");
+  document.querySelector('#tabs [data-t="meet"]').textContent="Hearings and meetings ("+meet.length+")";
+  document.querySelector('#tabs [data-t="mem"]').textContent="Members ("+(CG===info.latest?mem.length:0)+")";
+  document.getElementById("ml").innerHTML=meet.slice(0,300).map(function(m){return'<div class="row"><div class="t"><a href="'+Site.hearingHref(CG,m.id)+'"><b>'+esc(m.ti||"Meeting")+'</b></a></div><div class="m">'+esc(m.ty||"Meeting")+" · "+(m.dt?esc(Site.fmtDate(m.dt)):"date not listed")+(m.st&&m.st!=="Scheduled"?" · "+esc(m.st):"")+"</div></div>"}).join("")||'<p class="small">No meetings saved for this committee yet.</p>';
+  document.getElementById("mm").innerHTML=mem.length?'<div class="tblwrap"><table class="tbl"><thead><tr><th>Member</th><th>Party</th><th>State</th><th>Role</th></tr></thead><tbody>'+mem.map(function(x){var c=x.e.c[CG]||{};
+    return'<tr><td><a href="'+Site.memberHref(x.e.id,CG,c.chamber||"house")+'">'+esc(x.e.first+" "+x.e.last)+"</a></td><td>"+esc(c.party||"")+"</td><td>"+esc(c.state||"")+"</td><td>"+esc(x.title||(x.side==="minority"?"Minority":"Majority"))+"</td></tr>"}).join("")+"</tbody></table></div>"
+    :'<p class="small">Member lists are available for the current Congress once committee assignments have been saved.</p>';
+  document.querySelectorAll("#tabs button").forEach(function(b){b.onclick=function(){document.querySelectorAll("#tabs button").forEach(function(y){y.classList.toggle("on",y===b)});
+    ["bills","meet","mem"].forEach(function(t){document.getElementById("p-"+t).style.display=b.dataset.t===t?"":"none"})}});
+  drawBills();
+})();
+</script>
+</body>
+</html>

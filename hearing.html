@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hearing — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<p class="small"><a id="back" href="hearings.html">← All hearings</a></p>
+<h1 id="h">Hearing</h1>
+<p class="sub" id="sub"></p>
+<div class="cards" id="cards"></div>
+<div class="panel" id="wp" style="display:none"><h2 id="wh">Witnesses</h2><ul class="wl" id="wl" style="font-size:15px;color:inherit"></ul></div>
+<div class="panel" id="bp" style="display:none"><h2>Related bills</h2><div id="bb"></div></div>
+<div class="panel" id="np" style="display:none"><h2>Related nominations</h2><div id="nb"></div></div>
+<p class="small" id="links"></p>
+<p class="small" id="dlrow" style="display:none"><b>Download this meeting’s data:</b> <button type="button" id="dlj">Record (JSON)</button></p>
+<p class="foot" id="msg"></p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc;
+function when(m){
+  if(!m.dt)return"Date not listed";var d=new Date(m.dt);if(isNaN(d))return esc(m.dt);var o={timeZone:"America/New_York"};
+  var s=d.toLocaleDateString("en-US",Object.assign({weekday:"long",month:"long",day:"numeric",year:"numeric"},o));
+  return/T00:00:00/.test(m.dt)?s:s+", "+d.toLocaleTimeString("en-US",Object.assign({hour:"numeric",minute:"2-digit"},o))+" ET"}
+(async function(){
+  Site.nav("hearings");
+  var q=Site.qs(),info=await Site.congresses(),CG=parseInt(q.get("congress"),10)||(info&&info.latest)||119,ID=q.get("id")||"";
+  document.getElementById("back").href="hearings.html?congress="+CG;
+  var m=null;
+  try{m=(await Site.json("data/hearings/"+CG+".json")).meetings.filter(function(x){return x.id===ID&&!x.x})[0]}catch(e){}
+  if(!m){document.getElementById("h").textContent="Meeting "+ID;document.getElementById("msg").textContent="This meeting is not in the saved data for the "+Site.ordinal(CG)+" Congress yet.";return}
+  document.title=(m.ti||"Meeting")+" — Open Congress";
+  var s=(m.st||"").toLowerCase(),pill=s&&s!=="scheduled"?' <span class="pill '+(/cancel|postpon/.test(s)?"n":"g")+'">'+esc(m.st)+"</span>":"";
+  document.getElementById("h").innerHTML=esc(m.ti||"Untitled meeting")+pill;
+  document.getElementById("sub").textContent=(m.ty||"Meeting")+" of the "+Site.chamberName(m.ch)+", "+Site.ordinal(CG)+" Congress";
+  function cd(k,v,t){return'<div class="card"><div class="k">'+k+'</div><div class="v" style="font-size:17px">'+v+'</div><div class="d">'+(t||"")+"</div></div>"}
+  var coms=(m.com||[]).map(function(c){return c.c?'<a href="'+Site.committeeHref(CG,c.c)+'">'+esc(c.n)+"</a>":esc(c.n)}).join("<br>");
+  document.getElementById("cards").innerHTML=cd("When",when(m))+cd("Where",m.wh?esc(m.wh):"Not listed",Site.chamberName(m.ch))+cd("Committee",coms||"—")+cd("Witnesses",m.nw||0,m.v?"video available":"");
+  if((m.w||[]).length){document.getElementById("wl").innerHTML=m.w.map(function(w){return"<li><b>"+esc(w.n||"")+"</b>"+(w.p?", "+esc(w.p):"")+(w.o?" ("+esc(w.o)+")":"")+"</li>"}).join("")+(m.nw>m.w.length?"<li>and "+(m.nw-m.w.length)+" more</li>":"");document.getElementById("wp").style.display=""}
+  if((m.b||[]).length){
+    document.getElementById("bp").style.display="";
+    var rows=await Promise.all(m.b.map(function(b){return Site.billRow(b.c||CG,String(b.t).toUpperCase(),b.n)}));
+    document.getElementById("bb").innerHTML=m.b.map(function(b,i){var ty=String(b.t||"").toUpperCase(),r=rows[i];
+      return'<div class="row"><div class="t"><a href="bill.html?congress='+(b.c||CG)+"&type="+encodeURIComponent(ty)+"&number="+b.n+'"><b>'+esc(Site.billLabel(ty+" "+b.n))+"</b></a></div>"+(r&&r.t?'<div class="tt">'+esc(Site.clip(r.t,240))+"</div>":"")+"</div>"}).join("")}
+  if((m.nm||[]).length){
+    document.getElementById("np").style.display="";
+    var nm={};try{(await Site.json("data/nominations/"+CG+".json")).items.forEach(function(x){nm[x.n+(x.p?"-"+x.p:"")]=x})}catch(e){}
+    document.getElementById("nb").innerHTML=m.nm.map(function(k){var p=k.split("-"),r=nm[k]||nm[p[0]];
+      return'<div class="row"><div class="t"><a href="'+Site.nomHref(CG,p[0],p[1]||"")+'"><b>PN '+esc(k)+"</b></a></div>"+(r?'<div class="tt">'+esc(Site.clip(r.d,240))+"</div>":"")+"</div>"}).join("")}
+  document.getElementById("links").innerHTML='<a href="'+Site.eventUrl(CG,m.ch,m.id)+'" target="_blank" rel="noopener">View this meeting on Congress.gov</a>';
+  document.getElementById("dlrow").style.display="";
+  document.getElementById("dlj").onclick=function(){Site.saveFile("meeting-"+m.id+"-"+CG+".json",JSON.stringify(m,null,1),"application/json")};
+})();
+</script>
+</body>
+</html>

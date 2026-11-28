@@ -71,7 +71,7 @@ function row(r){
     vote=s.voice?" · voice vote or unanimous consent":(s.yea!=null?" · "+s.yea+"–"+s.nay:"");
     if(s.roll&&yr)vote+=' · <a href="'+Site.voteHref("senate",CG,ss,s.roll)+'">roll call '+s.roll+"</a>";
   }
-  return'<div class="row"><div class="t"><b>PN '+esc(r.n)+(r.p?"-"+esc(r.p):"")+"</b> "+pill+"</div>"+
+  return'<div class="row"><div class="t"><a href="'+Site.nomHref(CG,r.n,r.p||"")+'"><b>PN '+esc(r.n)+(r.p?"-"+esc(r.p):"")+"</b></a> "+pill+"</div>"+
     '<div class="tt">'+esc(Site.clip(r.d,260))+"</div>"+
     '<div class="m">'+(r.o?esc(r.o)+" · ":"")+(r._c!=="military"?esc(CATN[r._c])+" · ":"")+(r.r?"Received "+esc(Site.fmtDate(r.r)):"")+(s.k!=="pending"&&s.date?" · "+esc(st[0])+" "+esc(Site.fmtDate(s.date)):"")+vote+
     ' · <a href="'+Site.nomUrl(CG,r.n)+'" target="_blank" rel="noopener">Congress.gov</a></div>'+

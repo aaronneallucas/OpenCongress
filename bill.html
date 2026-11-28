@@ -13,17 +13,20 @@
 <p id="title" style="font-size:17px;max-width:900px"></p>
 <div class="cards" id="cards"></div>
 <p class="small" id="links"></p>
+<div id="meta" class="small" style="display:none"></div>
 <p class="small" id="dlrow"><b>Download this bill’s data:</b> <button type="button" id="dlc">Cosponsors (CSV)</button> <button type="button" id="dlj">Bill record (JSON)</button></p>
 <div class="panel" id="sump"><h2>Summary</h2><div class="sumtext" id="sum"></div><p class="small" id="sumn"></p></div>
 <div class="panel" id="tickp" style="display:none"><h2>Cosponsors by party</h2><div id="ticks" style="line-height:0"></div><p class="small" id="tickn"></p></div>
 <div class="panel" id="chp" style="display:none"><h2>Cosponsors over time</h2><div class="chart" id="cch" style="max-width:760px"></div><div class="lg" id="clg"></div><p class="small">Dates are when each member signed on, so the first step is the bill’s original cosponsors. The horizontal axis spans the two years of the Congress.</p></div>
-<div class="chips" id="btabs"><button data-t="votes" class="on">Roll call votes</button><button data-t="cos">Cosponsors</button></div>
+<div class="chips" id="btabs"><button data-t="votes" class="on">Roll call votes</button><button data-t="cos">Cosponsors</button><button data-t="act">Actions</button><button data-t="hear">Hearings</button></div>
 <div class="panel" id="p-votes"><div id="votes"></div></div>
 <div class="panel" id="p-cos" style="display:none"><div id="cosl"></div></div>
+<div class="panel" id="p-act" style="display:none"><div id="actl"></div></div>
+<div class="panel" id="p-hear" style="display:none"><div id="hearl"></div></div>
 <p class="foot">Data: Congress.gov and Senate.gov</p>
 <script src="site.js"></script>
 <script>
-var esc=Site.esc;
+var esc=Site.esc,DET=null;
 function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><div class="v" style="font-size:20px">'+v+'</div><div class="d">'+d+"</div></div>"}
 (async function(){
   Site.nav("bills");
@@ -52,7 +55,7 @@ function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><di
     document.getElementById("ticks").innerHTML=tk(Site.HEX.dY,D)+tk("#8a8a8a",O)+tk(Site.HEX.rY,R);
     document.getElementById("tickn").textContent="Each tick is one cosponsor: "+D+" Democratic (blue), "+R+" Republican (red)"+(O?", "+O+" other (gray)":"")+"."}
   document.querySelectorAll("#btabs button").forEach(function(x){x.onclick=function(){document.querySelectorAll("#btabs button").forEach(function(y){y.classList.toggle("on",y===x)});
-    document.getElementById("p-votes").style.display=x.dataset.t==="votes"?"":"none";document.getElementById("p-cos").style.display=x.dataset.t==="cos"?"":"none"}});
+    ["votes","cos","act","hear"].forEach(function(t){document.getElementById("p-"+t).style.display=x.dataset.t===t?"":"none"})}});
   var cosIds=[];
   if(meta&&rec){try{var cm=await Site.json("data/billlist/"+CG+"/cos-"+ty+"-"+Math.floor((n-1)/(meta.chunk||2000))+".json");cosIds=cm[String(n)]||[]}catch(e){}}
   var cr=cosIds.map(function(x){var id=Array.isArray(x)?x[0]:x,e=DIR[id];return e?{id:id,e:e,c:(e.c&&e.c[CG])||{},date:Array.isArray(x)?x[1]:""}:null}).filter(Boolean).sort(function(a,b){return(a.date||"9")<(b.date||"9")?-1:(a.date||"9")>(b.date||"9")?1:(a.e.last||"")<(b.e.last||"")?-1:1});
@@ -76,10 +79,30 @@ function card(k,v,d){return'<div class="card"><div class="k">'+esc(k)+'</div><di
     cr.map(function(x){return[x.id,x.e.first+" "+x.e.last,x.c.party,x.c.state,x.c.district||"",x.date||""]})))};
   document.getElementById("dlj").onclick=function(){Site.saveFile(fn+".json",JSON.stringify({bill:key,congress:CG,title:title,record:rec,law:law||null,
     cosponsors:cr.map(function(x){return{id:x.id,name:x.e.first+" "+x.e.last,party:x.c.party,state:x.c.state,district:x.c.district||null,date:x.date||null}}),
-    votes:votes_for_download()},null,1),"application/json")};
+    votes:votes_for_download(),details:DET},null,1),"application/json")};
   function votes_for_download(){var o=[];r[3].concat(r[4]).forEach(function(v){if(v.bill===key)o.push({chamber:v.chamber,session:v.session,roll:v.roll,date:v.date,question:v.question,result:v.result,yes:v.yes,no:v.no})});return o}
   var url=Site.billUrl(ty,n,CG);
   document.getElementById("links").innerHTML=url?'<a href="'+url+'" target="_blank" rel="noopener">View '+esc(label)+" on Congress.gov</a>":"";
+  /* committees, subjects, actions (with recorded votes) and hearings */
+  var det=await Site.chunkGet("data/billdetail/"+CG,ty,n),cm=await Site.chunkGet("data/committees/"+CG,ty,n),meta="";
+  if(cm&&cm.length){var cn={};try{(await Site.json("data/committees/"+CG+".json")).committees.forEach(function(c){cn[c.c]=c})}catch(e){}
+    cm.sort(function(a,b){return(cn[a]&&cn[a].p?1:0)-(cn[b]&&cn[b].p?1:0)});
+    meta+="<p><b>Committees:</b> "+cm.map(function(c){return'<a class="pill g" style="text-decoration:none;font-size:12px;padding:2px 9px" href="'+Site.committeeHref(CG,c)+'">'+esc(cn[c]?cn[c].n:c)+"</a>"}).join(" ")+"</p>"}
+  if(det&&(det.p||(det.s||[]).length)){
+    meta+="<p><b>Subjects:</b> "+(det.p?'<a class="pill y" style="text-decoration:none;font-size:12px;padding:2px 9px" href="bills.html?congress='+CG+"&view=subjects&area="+encodeURIComponent(det.p)+'">'+esc(det.p)+"</a> ":"")+
+      (det.s||[]).map(function(s){return'<a class="pill g" style="text-decoration:none;font-size:12px;padding:2px 9px" href="bills.html?congress='+CG+"&view=subjects&subject="+encodeURIComponent(s)+'">'+esc(s)+"</a>"}).join(" ")+"</p>"}
+  if(meta){document.getElementById("meta").innerHTML=meta;document.getElementById("meta").style.display=""}
+  DET=det||null;var acts=(det&&det.a)||[];
+  document.querySelector('#btabs [data-t="act"]').textContent="Actions ("+acts.length+")";
+  document.getElementById("actl").innerHTML=acts.length?'<div class="tblwrap"><table class="tbl"><thead><tr><th style="width:110px">Date</th><th>Action</th><th>Vote</th></tr></thead><tbody>'+acts.slice().reverse().map(function(a){
+    var vt=(a.v||[]).map(function(v){var ch=v.ch==="senate"||v.ch==="house"?v.ch:/senate/i.test(v.ch||"")?"senate":"house";return'<a href="'+Site.voteHref(ch,CG,v.s||1,v.roll)+'">Roll call '+v.roll+" ("+esc(Site.chamberName(ch))+")</a>"}).join("<br>");
+    if(!vt&&/voice vote|unanimous consent/i.test(a.t))vt='<span class="pill g" style="font-size:11px;padding:1px 8px">Voice vote</span>';
+    return"<tr><td>"+esc(Site.fmtDate(a.d))+"</td><td>"+esc(a.t)+(a.src?' <span class="small">('+esc(a.src)+")</span>":"")+"</td><td>"+vt+"</td></tr>"}).join("")+"</tbody></table></div>"
+    :'<p class="small">The full action list is read only for bills that have had a roll call vote, became law, or were covered in a hearing. It fills in over the next updates; until then see Congress.gov.</p>';
+  var hx=[];try{hx=(await Site.json("data/hearings/"+CG+"-index.json"))[key]||[]}catch(e){}
+  document.querySelector('#btabs [data-t="hear"]').textContent="Hearings ("+hx.length+")";
+  document.getElementById("hearl").innerHTML=hx.length?hx.sort(function(a,b){return(b[2]||"")<(a[2]||"")?-1:1}).map(function(m){
+    return'<div class="row"><div class="t"><a href="'+Site.hearingHref(CG,m[0])+'"><b>'+esc(m[3]||"Meeting")+'</b></a></div><div class="m">'+esc(m[4]||"Meeting")+" · "+(m[2]?esc(Site.fmtDate(m[2])):"date not listed")+" · "+Site.chamberName(m[1])+"</div></div>"}).join(""):'<p class="small">No hearings or meetings that name this bill have been saved.</p>';
   var votes=[];r[3].forEach(function(v){if(v.bill===key)votes.push(v)});r[4].forEach(function(v){if(v.bill===key)votes.push(v)});
   votes.sort(function(a,b){return(b.date||"")<(a.date||"")?-1:1});
   document.getElementById("votes").innerHTML=votes.map(function(v){var rp=Site.resultPill(v.result),ctx=Site.context(v,T);

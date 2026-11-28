@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nomination — Open Congress</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div id="nav"></div>
+<p class="small"><a id="back" href="nominations.html">← All nominations</a></p>
+<h1 id="h">Nomination</h1>
+<p class="sub" id="sub"></p>
+<div class="cards" id="cards"></div>
+<div class="panel" id="vp" style="display:none"><h2>Senate vote</h2><div id="vb"></div></div>
+<div class="panel" id="hp" style="display:none"><h2>Hearings and meetings</h2><div id="hb"></div></div>
+<p class="small" id="links"></p>
+<p class="small" id="dlrow" style="display:none"><b>Download this nomination’s data:</b> <button type="button" id="dlj">Record (JSON)</button></p>
+<p class="foot" id="msg"></p>
+<script src="site.js"></script>
+<script>
+var esc=Site.esc;
+(async function(){
+  Site.nav("nominations");
+  var q=Site.qs(),info=await Site.congresses(),CG=parseInt(q.get("congress"),10)||(info&&info.latest)||119,N=q.get("n")||"",P=q.get("p")||"";
+  document.getElementById("back").href="nominations.html?congress="+CG;
+  var r=null;
+  try{var j=await Site.json("data/nominations/"+CG+".json");r=j.items.filter(function(x){return x.n===N&&(x.p||"")===P})[0]||j.items.filter(function(x){return x.n===N})[0]}catch(e){}
+  if(!r){document.getElementById("h").textContent="PN "+N;document.getElementById("msg").textContent="This nomination is not in the saved data for the "+Site.ordinal(CG)+" Congress yet.";return}
+  var st=Site.nomStatus(r),sn=Site.NOM_STATUS[st.k],cat=Site.nomCat(r),catn=cat==="military"?"Military":(Site.NOM_CATS.filter(function(c){return c[0]===cat})[0]||[0,"Other"])[1];
+  var pn="PN"+r.n+(r.p?"-"+r.p:"");
+  document.title=pn+" — Open Congress";
+  document.getElementById("h").innerHTML="PN "+esc(r.n)+(r.p?"-"+esc(r.p):"")+' <span class="pill '+sn[1]+'">'+esc(sn[0])+"</span>";
+  document.getElementById("sub").textContent=r.d;
+  function cd(k,v,t){return'<div class="card"><div class="k">'+k+'</div><div class="v" style="font-size:18px">'+v+'</div><div class="d">'+(t||"")+"</div></div>"}
+  var days=(r.r&&st.date&&Date.parse(st.date)>=Date.parse(r.r))?Math.round((Date.parse(st.date)-Date.parse(r.r))/864e5):null;
+  document.getElementById("cards").innerHTML=cd("Received",r.r?esc(Site.fmtDate(r.r)):"—",Site.ordinal(CG)+" Congress")+cd("Latest action",st.date?esc(Site.fmtDate(st.date)):"—",esc(Site.clip(r.t||"",120)))+
+    cd("Subject group",esc(catn),r.o?esc(r.o):"")+(days!=null&&st.k==="confirmed"?cd("Time to confirm",days+" days","received to confirmed"):"");
+  if(st.k==="confirmed"){
+    var yr=parseInt((st.date||"").slice(0,4),10),ss=yr===1789+2*(CG-1)?1:2,h="";
+    if(st.voice)h="Confirmed by voice vote or unanimous consent, so there is no recorded roll call.";
+    else{h="Confirmed";if(st.yea!=null)h+=" <b>"+st.yea+"–"+st.nay+"</b>";h+=" on "+esc(Site.fmtDate(st.date))+".";
+      if(st.roll)h+=' <a href="'+Site.voteHref("senate",CG,ss,st.roll)+'">See the roll call vote map (vote '+st.roll+")</a>."}
+    document.getElementById("vb").innerHTML="<p>"+h+"</p>";document.getElementById("vp").style.display="";
+  }
+  try{var hx=(await Site.json("data/hearings/"+CG+"-index.json"))[pn]||[];
+    if(hx.length){document.getElementById("hb").innerHTML=hx.sort(function(a,b){return(b[2]||"")<(a[2]||"")?-1:1}).map(function(m){
+      return'<div class="row"><div class="t"><a href="'+Site.hearingHref(CG,m[0])+'"><b>'+esc(m[3]||"Meeting")+"</b></a></div><div class=\"m\">"+esc(m[4]||"Meeting")+" · "+(m[2]?esc(Site.fmtDate(m[2])):"date not listed")+" · "+Site.chamberName(m[1])+"</div></div>"}).join("");
+      document.getElementById("hp").style.display=""}}catch(e){}
+  document.getElementById("links").innerHTML='<a href="'+Site.nomUrl(CG,r.n)+'" target="_blank" rel="noopener">View PN '+esc(r.n)+" on Congress.gov</a>";
+  document.getElementById("dlrow").style.display="";
+  document.getElementById("dlj").onclick=function(){Site.saveFile(pn+"-"+CG+".json",JSON.stringify({congress:CG,nomination:r,status:st,subjectGroup:cat},null,1),"application/json")};
+})();
+</script>
+</body>
+</html>

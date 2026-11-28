@@ -38,16 +38,16 @@ function stPill(m){
   var s=(m.st||"").toLowerCase();if(!s||s==="scheduled")return"";
   return' <span class="pill '+(/cancel|postpon/.test(s)?"n":"g")+'" style="font-size:11px;padding:1px 8px">'+esc(m.st)+"</span>"}
 function row(m){
-  var coms=(m.com||[]).map(function(c){return esc(c.n)}).join("; ");
+  var coms=(m.com||[]).map(function(c){return c.c?'<a href="'+Site.committeeHref(CG,c.c)+'">'+esc(c.n)+"</a>":esc(c.n)}).join("; ");
   var bills=(m.b||[]).map(function(b){var k=String(b.t||"").toUpperCase()+" "+b.n;return'<a href="bill.html?congress='+(b.c||CG)+"&type="+encodeURIComponent(String(b.t||"").toUpperCase())+"&number="+b.n+'">'+esc(Site.billLabel(k))+"</a>"}).join(", ");
   var det="";
   if((m.w||[]).length)det+='<details class="dt"><summary>'+m.nw+" witness"+(m.nw===1?"":"es")+'</summary><ul class="wl">'+m.w.map(function(w){return"<li>"+esc(w.n||"")+(w.p?", "+esc(w.p):"")+(w.o?" ("+esc(w.o)+")":"")+"</li>"}).join("")+(m.nw>m.w.length?"<li>and "+(m.nw-m.w.length)+" more</li>":"")+"</ul></details>";
-  return'<div class="row"><div class="t"><b>'+esc(m.ti||"Untitled meeting")+"</b>"+stPill(m)+"</div>"+
+  return'<div class="row"><div class="t"><a href="'+Site.hearingHref(CG,m.id)+'"><b>'+esc(m.ti||"Untitled meeting")+"</b></a>"+stPill(m)+"</div>"+
     (coms?'<div class="tt">'+coms+"</div>":"")+
     '<div class="m">'+esc(m.ty||"Meeting")+" · "+when(m)+(m.wh?" · "+esc(m.wh):"")+" · "+Site.chamberName(m.ch)+(m.v?" · video available":"")+
     ' · <a href="'+Site.eventUrl(CG,m.ch,m.id)+'" target="_blank" rel="noopener">Congress.gov</a></div>'+
     (bills?'<div class="tt dim">Related bills: '+bills+"</div>":"")+
-    ((m.nm||[]).length?'<div class="tt dim">Related nominations: '+m.nm.map(function(n){return'<a href="'+Site.nomUrl(CG,n)+'" target="_blank" rel="noopener">PN '+esc(n)+"</a>"}).join(", ")+"</div>":"")+det+"</div>";
+    ((m.nm||[]).length?'<div class="tt dim">Related nominations: '+m.nm.map(function(n){var p=String(n).split("-");return'<a href="'+Site.nomHref(CG,p[0],p[1]||"")+'">PN '+esc(n)+"</a>"}).join(", ")+"</div>":"")+det+"</div>";
 }
 function flt(){
   var h='<button data-v="up"'+(VIEW==="up"?' class="on"':"")+'>Upcoming</button><button data-v="past"'+(VIEW==="past"?' class="on"':"")+'>Previous</button><span style="width:14px"></span>'+
